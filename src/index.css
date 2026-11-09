@@ -2,8 +2,8 @@
 
 @layer base {
   :root {
-    --font-serif: 'Cormorant Garamond', Georgia, serif;
-    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: 'Be Vietnam Pro', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Be Vietnam Pro', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
   }
 
@@ -12,8 +12,9 @@
     scroll-behavior: smooth;
   }
 
-  h1, h2, .font-display {
-    font-family: var(--font-serif);
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
   }
 
   .font-tech {
@@ -23,18 +24,18 @@
 
 /* Native modal dialog backdrop styling following modern-web-guidance light-dismiss-a-dialog */
 dialog::backdrop {
-  background-color: rgba(11, 20, 17, 0.75);
+  background-color: rgba(15, 23, 42, 0.8);
   backdrop-filter: blur(6px);
 }
 
 dialog[open] {
-  animation: dialogFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: dialogFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes dialogFadeIn {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.985);
+    transform: translateY(10px) scale(0.985);
   }
   to {
     opacity: 1;
