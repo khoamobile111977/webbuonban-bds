@@ -1,27 +1,25 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Compass,
   ExternalLink,
-  FileCheck2,
+  FileCheck,
   Film,
   Image as ImageIcon,
   MapPin,
-  Maximize,
   Maximize2,
   MessageCircle,
   Minimize2,
-  PhoneCall,
-  Play,
+  Phone,
   Route,
   Ruler,
   Sparkles,
   X,
 } from 'lucide-react';
+import { formatZaloLink, sanitizeUrl } from './supabase';
 import { LandPlot, SiteSettings } from './types';
-import { buildZaloUrl } from './supabase';
 
 interface PlotDetailModalProps {
   plot: LandPlot | null;
@@ -29,10 +27,10 @@ interface PlotDetailModalProps {
   onClose: () => void;
 }
 
-interface UnifiedMediaItem {
+type MediaItem = {
   type: 'image' | 'video';
   url: string;
-}
+};
 
 export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
   plot,
@@ -40,37 +38,22 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
   onClose,
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const titleId = useId();
-
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const mediaItems = useMemo<UnifiedMediaItem[]>(() => {
+  const mediaList: MediaItem[] = React.useMemo(() => {
     if (!plot) return [];
-    const items: UnifiedMediaItem[] = [];
-    for (const img of plot.images || []) {
-      if (img && img.trim()) {
-        items.push({ type: 'image', url: img.trim() });
-      }
-    }
-    for (const vid of plot.videos || []) {
-      if (vid && vid.trim()) {
-        items.push({ type: 'video', url: vid.trim() });
-      }
-    }
-    if (items.length === 0) {
-      items.push({
-        type: 'image',
-        url: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80',
-      });
-    }
-    return items;
+    const imgs: MediaItem[] = (plot.images || [])
+      .map((url) => sanitizeUrl(url))
+      .filter(Boolean)
+      .map((url) => ({ type: 'image', url }));
+    const vids: MediaItem[] = (plot.videos || [])
+      .map((url) => sanitizeUrl(url))
+      .filter(Boolean)
+      .map((url) => ({ type: 'video', url }));
+    return [...imgs, ...vids];
   }, [plot]);
 
-  const currentMedia = mediaItems[activeMediaIndex] || mediaItems[0];
-
-  // Open modal using native showModal()
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -86,436 +69,244 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
     }
   }, [plot]);
 
-  // Mandatory fallback for browsers without <dialog closedby="any"> support
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    const handleCloseEvent = () => {
-      setIsFullscreen(false);
-      onClose();
-    };
-    dialog.addEventListener('close', handleCloseEvent);
-
-    let handleBackdropClick: ((event: MouseEvent) => void) | undefined;
-    if (!('closedBy' in HTMLDialogElement.prototype)) {
-      handleBackdropClick = (event: MouseEvent) => {
-        if (event.target !== dialog) return;
-        const rect = dialog.getBoundingClientRect();
-        const isDialogContent =
-          rect.top <= event.clientY &&
-          event.clientY <= rect.top + rect.height &&
-          rect.left <= event.clientX &&
-          event.clientX <= rect.left + rect.width;
-        if (isDialogContent) return;
-        dialog.close();
-      };
-      dialog.addEventListener('click', handleBackdropClick);
-    }
-
-    return () => {
-      dialog.removeEventListener('close', handleCloseEvent);
-      if (handleBackdropClick) {
-        dialog.removeEventListener('click', handleBackdropClick);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!plot) return;
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsFullscreen(false);
+      } else if (e.key === 'ArrowRight' && mediaList.length > 1) {
+        setActiveMediaIndex((prev) => (prev + 1) % mediaList.length);
+      } else if (e.key === 'ArrowLeft' && mediaList.length > 1) {
+        setActiveMediaIndex((prev) => (prev - 1 + mediaList.length) % mediaList.length);
       }
     };
-  }, [onClose]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [plot, isFullscreen, mediaList.length]);
 
-  // Feature-detect native media lazy loading on HTMLMediaElement.prototype
-  useEffect(() => {
-    const videoEl = videoRef.current;
-    if (!videoEl || !currentMedia || currentMedia.type !== 'video') return;
+  if (!plot) return null;
 
-    const supportsLazyMedia = Object.hasOwn(HTMLMediaElement.prototype, 'loading');
-    if (!supportsLazyMedia) {
-      const mediaObserver = new IntersectionObserver(
-        (entries, observer) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const media = entry.target as HTMLVideoElement;
-            if (media.dataset.poster) {
-              media.poster = media.dataset.poster;
-              delete media.dataset.poster;
-            }
-            if (media.dataset.preload) {
-              media.preload = media.dataset.preload as '' | 'none' | 'metadata' | 'auto';
-              delete media.dataset.preload;
-            }
-            if (media.dataset.src) {
-              media.src = media.dataset.src;
-              delete media.dataset.src;
-            }
-            media.load();
-            observer.unobserve(media);
-          }
-        },
-        { rootMargin: '200px 0px' }
-      );
-      mediaObserver.observe(videoEl);
-      return () => mediaObserver.disconnect();
-    }
-  }, [currentMedia, activeMediaIndex, plot]);
+  const activeMedia: MediaItem = mediaList[activeMediaIndex] || {
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80',
+  };
 
-  if (!plot) {
-    return (
-      <dialog
-        ref={dialogRef}
-        {...({ closedby: 'any' } as any)}
-        aria-labelledby={titleId}
-        className="hidden"
-      />
-    );
-  }
-
-  const zaloUrl = buildZaloUrl(settings.zalo_phone);
-  const hasMapUrl = Boolean(plot.map_url && plot.map_url.trim());
-  const displayPrice = plot.price_display?.trim() || 'Liên hệ để trao đổi';
-  const displayPricePerM2 = plot.price_per_m2?.trim() || '';
-  const firstPosterImage =
-    plot.images && plot.images.length > 0 ? plot.images[0] : undefined;
-
-  // Build only non-empty technical specifications (never auto-fill blank fields)
-  const validSpecs: Array<{
-    key: string;
-    label: string;
-    value: string;
-    icon: React.ReactNode;
-    isMono?: boolean;
-  }> = [];
-
-  if (plot.area_m2 && plot.area_m2 > 0) {
-    validSpecs.push({
-      key: 'area',
-      label: 'Diện tích',
-      value: `${plot.area_m2} m²`,
-      icon: <Maximize2 className="h-4 w-4 text-blue-600" />,
-      isMono: true,
-    });
-  }
-  if (plot.dimensions && plot.dimensions.trim()) {
-    validSpecs.push({
-      key: 'dimensions',
-      label: 'Kích thước (Ngang × Dài)',
-      value: plot.dimensions.trim(),
-      icon: <Ruler className="h-4 w-4 text-blue-600" />,
-      isMono: true,
-    });
-  }
-  if (plot.direction && plot.direction.trim()) {
-    validSpecs.push({
-      key: 'direction',
-      label: 'Hướng',
-      value: plot.direction.trim(),
-      icon: <Compass className="h-4 w-4 text-blue-600" />,
-    });
-  }
-  if (plot.road_width && plot.road_width.trim()) {
-    validSpecs.push({
-      key: 'road',
-      label: 'Đường trước đất',
-      value: plot.road_width.trim(),
-      icon: <Route className="h-4 w-4 text-blue-600" />,
-    });
-  }
-  if (plot.legal_status && plot.legal_status.trim()) {
-    validSpecs.push({
-      key: 'legal',
-      label: 'Pháp lý',
-      value: plot.legal_status.trim(),
-      icon: <FileCheck2 className="h-4 w-4 text-blue-600" />,
-    });
-  }
-
-  const hasDescription = Boolean(plot.description && plot.description.trim());
-  const hasHighlights = Boolean(plot.highlights && plot.highlights.length > 0);
-
-  const statusConfig = {
+  const statusBadge = {
     available: {
       label: 'Đang Mở Bán',
-      badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      dotClass: 'bg-emerald-500',
+      bg: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      dot: 'bg-emerald-500',
     },
     reserved: {
       label: 'Đã Nhận Cọc',
-      badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
-      dotClass: 'bg-amber-500',
+      bg: 'bg-amber-50 text-amber-800 border-amber-200',
+      dot: 'bg-amber-500',
     },
     sold: {
       label: 'Đã Bán',
-      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
-      dotClass: 'bg-slate-500',
+      bg: 'bg-slate-200 text-slate-700 border-slate-300',
+      dot: 'bg-slate-500',
     },
-  }[plot.status || 'available'];
+  }[plot.status];
 
-  const goPrevMedia = () => {
-    setActiveMediaIndex((prev) => (prev - 1 + mediaItems.length) % mediaItems.length);
-  };
+  const hasPrice = Boolean(plot.price_display && plot.price_display.trim().length > 0);
+  const hasPricePerM2 = Boolean(plot.price_per_m2 && plot.price_per_m2.trim().length > 0);
+  const safeMapUrl = sanitizeUrl(plot.map_url);
+  const hasMapUrl = Boolean(safeMapUrl);
+  const zaloDirectUrl = formatZaloLink(settings.zalo_phone);
 
-  const goNextMedia = () => {
-    setActiveMediaIndex((prev) => (prev + 1) % mediaItems.length);
-  };
+  const specItems = [
+    plot.area_m2 && plot.area_m2 > 0
+      ? {
+          icon: <Maximize2 className="h-4 w-4 text-blue-600" />,
+          label: 'Diện tích',
+          value: `${plot.area_m2} m²`,
+        }
+      : null,
+    plot.dimensions && plot.dimensions.trim()
+      ? {
+          icon: <Ruler className="h-4 w-4 text-blue-600" />,
+          label: 'Kích thước',
+          value: plot.dimensions.trim(),
+        }
+      : null,
+    plot.direction && plot.direction.trim()
+      ? {
+          icon: <Compass className="h-4 w-4 text-blue-600" />,
+          label: 'Hướng',
+          value: plot.direction.trim(),
+        }
+      : null,
+    plot.road_width && plot.road_width.trim()
+      ? {
+          icon: <Route className="h-4 w-4 text-blue-600" />,
+          label: 'Đường trước đất',
+          value: plot.road_width.trim(),
+        }
+      : null,
+    plot.legal_status && plot.legal_status.trim()
+      ? {
+          icon: <FileCheck className="h-4 w-4 text-emerald-600" />,
+          label: 'Pháp lý',
+          value: plot.legal_status.trim(),
+        }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
 
   return (
-    <dialog
-      ref={dialogRef}
-      {...({ closedby: 'any' } as any)}
-      aria-labelledby={titleId}
-      className="m-auto w-[96vw] max-w-[1360px] rounded-3xl bg-white p-0 text-slate-900 shadow-2xl border border-slate-200 overflow-hidden max-h-[94vh]"
-    >
-      {/* FULL SCREEN LIGHTBOX OVERLAY FOR IMAGES & VIDEOS */}
-      {isFullscreen && currentMedia && (
-        <div className="fixed inset-0 z-50 bg-slate-950/98 text-white flex flex-col justify-between p-4 sm:p-6">
-          {/* Fullscreen Header */}
-          <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-3">
-            <div className="flex items-center gap-3">
-              <span className="font-tech rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white">
-                {plot.code}
+    <>
+      <dialog
+        ref={dialogRef}
+        {...({ closedby: 'any' } as Record<string, string>)}
+        onClose={onClose}
+        onClick={(e) => {
+          if (e.target === dialogRef.current && !isFullscreen) {
+            onClose();
+          }
+        }}
+        className="m-auto w-[96vw] max-w-[1440px] rounded-3xl bg-white text-slate-900 p-0 shadow-2xl border border-slate-200 overflow-hidden max-h-[94vh]"
+      >
+        <div className="flex flex-col max-h-[94vh] overflow-y-auto">
+          {/* Sticky Top Bar */}
+          <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/95 px-5 sm:px-8 py-4 backdrop-blur-md">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="font-tech rounded-xl bg-slate-900 px-3.5 py-1.5 text-xs sm:text-sm font-bold tracking-wider text-amber-400">
+                MÃ LÔ: {plot.code}
               </span>
-              <span className="text-sm font-bold text-slate-200 truncate max-w-md sm:max-w-xl">
-                {plot.title}
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs sm:text-sm font-semibold ${statusBadge.bg}`}
+              >
+                <span className={`h-2 w-2 rounded-full ${statusBadge.dot}`} />
+                {statusBadge.label}
               </span>
-              <span className="font-tech text-xs text-slate-400">
-                ({activeMediaIndex + 1} / {mediaItems.length})
-              </span>
+              {plot.category && (
+                <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-slate-100 px-3.5 py-1 text-xs sm:text-sm font-medium text-slate-700">
+                  {plot.category}
+                </span>
+              )}
             </div>
+
             <button
               type="button"
-              onClick={() => setIsFullscreen(false)}
-              className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-xs sm:text-sm font-bold text-white hover:bg-white/25 transition cursor-pointer"
-            >
-              <Minimize2 className="h-4 w-4" />
-              <span>Thu Nhỏ Toàn Màn Hình</span>
-            </button>
-          </div>
-
-          {/* Fullscreen Main Stage */}
-          <div className="relative flex-1 flex items-center justify-center overflow-hidden my-2">
-            {mediaItems.length > 1 && (
-              <button
-                type="button"
-                onClick={goPrevMedia}
-                aria-label="Trước"
-                className="absolute left-2 sm:left-6 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white hover:bg-blue-600 transition cursor-pointer"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
-            )}
-
-            {currentMedia.type === 'image' ? (
-              <img
-                src={currentMedia.url}
-                alt={`${plot.title} - ${activeMediaIndex + 1}`}
-                className="max-h-[76vh] max-w-full object-contain rounded-lg select-none"
-              />
-            ) : (
-              <video
-                key={`fs-${currentMedia.url}`}
-                controls
-                autoPlay
-                width={1280}
-                height={720}
-                poster={firstPosterImage}
-                className="max-h-[76vh] max-w-full object-contain rounded-lg bg-black"
-              >
-                <source src={currentMedia.url} type="video/mp4" />
-                Trình duyệt của bạn không hỗ trợ phát video.
-              </video>
-            )}
-
-            {mediaItems.length > 1 && (
-              <button
-                type="button"
-                onClick={goNextMedia}
-                aria-label="Tiếp theo"
-                className="absolute right-2 sm:right-6 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white hover:bg-blue-600 transition cursor-pointer"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </button>
-            )}
-          </div>
-
-          {/* Fullscreen Bottom Thumbnails */}
-          {mediaItems.length > 1 && (
-            <div className="flex items-center justify-center gap-2.5 overflow-x-auto pt-2 border-t border-white/10">
-              {mediaItems.map((item, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setActiveMediaIndex(idx)}
-                  className={`relative h-16 w-24 flex-shrink-0 overflow-hidden rounded-xl border-2 transition cursor-pointer ${
-                    activeMediaIndex === idx
-                      ? 'border-blue-500 ring-2 ring-blue-500/40'
-                      : 'border-white/20 opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {item.type === 'image' ? (
-                    <img
-                      src={item.url}
-                      alt={`Thumb ${idx + 1}`}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="h-full w-full bg-slate-900 flex flex-col items-center justify-center text-white">
-                      <Play className="h-5 w-5 text-amber-400 fill-amber-400" />
-                      <span className="text-[10px] font-bold mt-0.5">Video</span>
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* REGULAR MODAL CONTENT */}
-      <div className="flex flex-col max-h-[94vh]">
-        {/* Top Sticky Modal Header */}
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4 sticky top-0 z-20">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="font-tech rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-bold tracking-wider text-amber-400">
-              MÃ LÔ: {plot.code}
-            </span>
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs font-bold ${statusConfig.badgeClass}`}
-            >
-              <span className={`h-2 w-2 rounded-full ${statusConfig.dotClass}`} />
-              {statusConfig.label}
-            </span>
-            {plot.category && (
-              <span className="rounded-full bg-slate-100 px-3.5 py-1 text-xs font-semibold text-slate-700">
-                {plot.category}
-              </span>
-            )}
-          </div>
-
-          <form method="dialog">
-            <button
-              type="submit"
+              onClick={onClose}
               aria-label="Đóng cửa sổ chi tiết"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition hover:bg-slate-900 hover:text-white cursor-pointer"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-700 transition hover:bg-slate-900 hover:text-white cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>
-          </form>
-        </div>
+          </div>
 
-        {/* Modal Body */}
-        <div className="overflow-y-auto p-6 lg:p-8 bg-slate-50/60">
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-            {/* Left Column: Unified Media Gallery (Images & Videos Together) + Description */}
+          {/* Main Modal Content Grid */}
+          <div className="grid grid-cols-1 gap-8 p-5 sm:p-8 lg:grid-cols-12">
+            {/* Left Column: Unified Media Gallery + Description */}
             <div className="lg:col-span-7 space-y-6">
-              {/* Unified Media Header */}
+              {/* Unified Header: Hình ảnh / Video */}
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs sm:text-sm font-bold text-white shadow-xs">
+                <div className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white">
                   <ImageIcon className="h-4 w-4 text-amber-400" />
-                  <span>Hình ảnh / Video ({mediaItems.length})</span>
+                  <span>Hình ảnh / Video ({mediaList.length})</span>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setIsFullscreen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 shadow-2xs transition hover:bg-slate-900 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-800 transition hover:bg-slate-900 hover:text-white cursor-pointer"
                   >
-                    <Maximize className="h-3.5 w-3.5 text-blue-600" />
+                    <Maximize2 className="h-4 w-4" />
                     <span>Xem toàn màn hình</span>
                   </button>
 
                   {hasMapUrl && (
                     <a
-                      href={plot.map_url}
+                      href={safeMapUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs sm:text-sm font-semibold text-blue-700 transition hover:bg-blue-600 hover:text-white"
                     >
-                      <MapPin className="h-3.5 w-3.5" />
+                      <MapPin className="h-4 w-4" />
                       <span>Mở Google Maps</span>
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}
                 </div>
               </div>
 
-              {/* Main Media Stage */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-md group">
-                {currentMedia.type === 'image' ? (
+              {/* Active Media Stage */}
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 aspect-[16/10] shadow-md group">
+                {activeMedia.type === 'image' ? (
                   <div
                     onClick={() => setIsFullscreen(true)}
+                    className="h-full w-full cursor-zoom-in relative"
                     title="Bấm để phóng to toàn màn hình"
-                    className="relative aspect-[16/10] w-full cursor-zoom-in"
                   >
                     <img
-                      src={currentMedia.url}
+                      src={activeMedia.url}
                       alt={`${plot.title} - ${activeMediaIndex + 1}`}
-                      width={800}
-                      height={500}
                       className="h-full w-full object-cover"
                     />
-                    <div className="absolute bottom-3.5 right-3.5 flex items-center gap-2">
-                      <span className="rounded-lg bg-black/70 px-3 py-1.5 text-xs font-bold text-white backdrop-blur-xs font-tech">
-                        {activeMediaIndex + 1} / {mediaItems.length}
-                      </span>
+                    <div className="absolute bottom-3 right-3 rounded-xl bg-slate-900/80 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-xs">
+                      {activeMediaIndex + 1} / {mediaList.length || 1}
                     </div>
                   </div>
                 ) : (
-                  <div className="relative aspect-[16/10] w-full bg-black flex items-center justify-center">
+                  <div className="h-full w-full flex items-center justify-center bg-black relative">
                     <video
-                      ref={videoRef}
-                      key={currentMedia.url}
+                      key={activeMedia.url}
+                      src={`${activeMedia.url}#t=0.1`}
                       controls
-                      {...({ loading: 'lazy' } as any)}
-                      width={800}
-                      height={450}
-                      poster={firstPosterImage}
+                      playsInline
                       preload="metadata"
-                      className="h-full w-full object-contain"
+                      width={1280}
+                      height={720}
+                      className="h-full w-full max-h-[520px] object-contain"
                     >
-                      <source src={currentMedia.url} type="video/mp4" />
-                      Trình duyệt của bạn không hỗ trợ phát video.
+                      Trình duyệt của bạn không hỗ trợ phát video trực tiếp.
                     </video>
                   </div>
                 )}
 
-                {/* Prev / Next Overlay Arrows */}
-                {mediaItems.length > 1 && (
+                {mediaList.length > 1 && (
                   <>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        goPrevMedia();
-                      }}
+                      onClick={() =>
+                        setActiveMediaIndex(
+                          (prev) => (prev - 1 + mediaList.length) % mediaList.length
+                        )
+                      }
                       aria-label="Trước"
-                      className="absolute left-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-blue-600 transition cursor-pointer"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900/75 text-white backdrop-blur-xs transition hover:bg-slate-900 cursor-pointer"
                     >
-                      <ChevronLeft className="h-5 w-5" />
+                      <ChevronLeft className="h-6 w-6" />
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        goNextMedia();
-                      }}
+                      onClick={() =>
+                        setActiveMediaIndex((prev) => (prev + 1) % mediaList.length)
+                      }
                       aria-label="Tiếp"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-blue-600 transition cursor-pointer"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900/75 text-white backdrop-blur-xs transition hover:bg-slate-900 cursor-pointer"
                     >
-                      <ChevronRight className="h-5 w-5" />
+                      <ChevronRight className="h-6 w-6" />
                     </button>
                   </>
                 )}
               </div>
 
-              {/* Unified Thumbnails Strip (Both Images & Videos in One Place) */}
-              {mediaItems.length > 1 && (
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {mediaItems.map((item, idx) => (
+              {/* Unified Thumbnail Strip (Video thumbnails show the actual video frame, never plot cover photo!) */}
+              {mediaList.length > 1 && (
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
+                  {mediaList.map((item, idx) => (
                     <button
-                      key={idx}
+                      key={`${item.type}-${idx}`}
                       type="button"
                       onClick={() => setActiveMediaIndex(idx)}
-                      className={`relative h-20 w-28 flex-shrink-0 overflow-hidden rounded-xl border-2 transition cursor-pointer ${
+                      className={`relative aspect-[16/10] overflow-hidden rounded-xl border-2 transition cursor-pointer ${
                         activeMediaIndex === idx
-                          ? 'border-blue-600 ring-2 ring-blue-600/25'
+                          ? 'border-blue-600 ring-2 ring-blue-600/30 scale-[1.02]'
                           : 'border-slate-200 opacity-75 hover:opacity-100'
                       }`}
                     >
@@ -524,29 +315,24 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
                           src={item.url}
                           alt={`Hình ${idx + 1}`}
                           loading="lazy"
-                          fetchPriority="low"
-                          width={112}
-                          height={80}
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <div className="relative h-full w-full bg-slate-900 flex flex-col items-center justify-center text-white">
-                          {firstPosterImage && (
-                            <img
-                              src={firstPosterImage}
-                              alt="Video poster"
-                              loading="lazy"
-                              fetchPriority="low"
-                              width={112}
-                              height={80}
-                              className="absolute inset-0 h-full w-full object-cover opacity-40"
-                            />
-                          )}
-                          <div className="relative z-10 flex flex-col items-center">
-                            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white shadow">
-                              <Play className="h-4 w-4 fill-current ml-0.5" />
+                        <div className="h-full w-full bg-slate-900 relative flex items-center justify-center">
+                          <video
+                            src={`${item.url}#t=0.1`}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            width={240}
+                            height={150}
+                            className="h-full w-full object-cover opacity-85 pointer-events-none"
+                          />
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/35">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
+                              <Film className="h-4 w-4" />
                             </span>
-                            <span className="mt-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold">
+                            <span className="mt-1 text-[10px] font-bold text-white uppercase tracking-wider bg-slate-950/80 px-1.5 py-0.5 rounded">
                               Video
                             </span>
                           </div>
@@ -557,34 +343,37 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
                 </div>
               )}
 
-              {/* Detailed Description & Highlights (Only shown if non-empty) */}
-              {(hasDescription || hasHighlights) && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-5 shadow-2xs">
-                  {hasDescription && (
+              {/* Detailed Description & Highlights */}
+              {(Boolean(plot.description && plot.description.trim()) ||
+                (plot.highlights && plot.highlights.length > 0)) && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-6 space-y-5">
+                  {plot.description && plot.description.trim() && (
                     <div>
-                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <h3 className="font-display text-lg font-bold text-slate-900 flex items-center gap-2 mb-2.5">
                         <Sparkles className="h-5 w-5 text-blue-600" />
                         Thông Tin Mô Tả Lô Đất
                       </h3>
-                      <p className="mt-3 whitespace-pre-line text-sm sm:text-base leading-relaxed text-slate-700">
+                      <p className="text-sm sm:text-base leading-relaxed text-slate-700 whitespace-pre-line">
                         {plot.description}
                       </p>
                     </div>
                   )}
 
-                  {hasHighlights && (
-                    <div className={hasDescription ? 'pt-4 border-t border-slate-100' : ''}>
+                  {plot.highlights && plot.highlights.length > 0 && (
+                    <div className="pt-3 border-t border-slate-200">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
                         Đặc Điểm Nổi Bật
                       </h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {plot.highlights.map((item, idx) => (
+                      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                        {plot.highlights.map((item, i) => (
                           <div
-                            key={idx}
-                            className="flex items-start gap-2.5 rounded-xl bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-800 border border-slate-200/80"
+                            key={i}
+                            className="flex items-start gap-2.5 rounded-xl bg-white p-3 border border-slate-200/80 shadow-2xs"
                           >
-                            <CheckCircle2 className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                            <span>{item}</span>
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                            <span className="text-sm font-medium text-slate-800">
+                              {item}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -594,71 +383,67 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
               )}
             </div>
 
-            {/* Right Column: Title, Pricing, Dynamic Specs & Direct Zalo Contact */}
-            <div className="lg:col-span-5 space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-7 shadow-2xs space-y-6">
+            {/* Right Column: Price, Non-empty Specs & Direct Zalo CTA */}
+            <div className="lg:col-span-5 flex flex-col justify-between space-y-6">
+              <div className="space-y-6">
                 <div>
                   {(plot.location_name || plot.province) && (
-                    <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-blue-700 mb-2">
+                    <div className="flex items-center gap-1.5 text-sm font-bold text-blue-700 mb-2">
                       <MapPin className="h-4 w-4 flex-shrink-0" />
                       <span>
-                        {plot.location_name}
-                        {plot.province ? `, ${plot.province}` : ''}
+                        {[plot.location_name, plot.province].filter(Boolean).join(', ')}
                       </span>
                     </div>
                   )}
-                  <h2
-                    id={titleId}
-                    className="font-display text-2xl sm:text-3xl font-extrabold leading-snug text-slate-900"
-                  >
+                  <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-slate-900 leading-snug">
                     {plot.title}
                   </h2>
                   {plot.subtitle && plot.subtitle.trim() && (
-                    <p className="mt-2 text-sm sm:text-base text-slate-600">{plot.subtitle}</p>
+                    <p className="mt-2 text-sm sm:text-base text-slate-600">
+                      {plot.subtitle}
+                    </p>
                   )}
                 </div>
 
-                {/* Price Banner */}
-                <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-5 text-white shadow-md">
-                  <div className="flex flex-wrap items-baseline justify-between gap-4">
+                {/* Prominent Price Card */}
+                <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 p-6 text-white shadow-lg">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <div>
-                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
+                      <span className="text-xs uppercase tracking-widest text-slate-300 font-semibold block">
                         Giá Bán
                       </span>
-                      <span className="font-tech text-2xl sm:text-3xl font-extrabold text-amber-400 mt-1 block">
-                        {displayPrice}
-                      </span>
+                      <div className="font-tech text-2xl sm:text-3xl font-extrabold text-amber-400 mt-1">
+                        {hasPrice ? plot.price_display : 'Liên hệ để trao đổi'}
+                      </div>
                     </div>
-                    {displayPricePerM2 && (
+                    {hasPrice && hasPricePerM2 && (
                       <div className="text-right">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
-                          Đơn Giá / m²
-                        </span>
-                        <span className="font-tech text-sm sm:text-base font-bold text-blue-300 mt-1 block">
-                          {displayPricePerM2}
+                        <span className="text-xs text-slate-300 block">Đơn giá tham khảo</span>
+                        <span className="font-tech text-sm sm:text-base font-bold text-white">
+                          {plot.price_per_m2}
                         </span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Specification Grid (Only renders fields that are not blank) */}
-                {validSpecs.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {validSpecs.map((spec) => (
+                {/* Dynamic Specifications Grid */}
+                {specItems.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3.5">
+                    {specItems.map((spec, idx) => (
                       <div
-                        key={spec.key}
-                        className="rounded-xl bg-slate-50 p-4 border border-slate-200/80"
+                        key={idx}
+                        className={`rounded-2xl border border-slate-200 bg-slate-50/70 p-4 ${
+                          idx === specItems.length - 1 && specItems.length % 2 === 1
+                            ? 'col-span-2'
+                            : ''
+                        }`}
                       >
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                           {spec.icon}
                           <span>{spec.label}</span>
                         </div>
-                        <div
-                          className={`mt-1.5 text-base font-bold text-slate-900 ${
-                            spec.isMono ? 'font-tech' : ''
-                          }`}
-                        >
+                        <div className="mt-1.5 font-tech text-base font-bold text-slate-900">
                           {spec.value}
                         </div>
                       </div>
@@ -666,57 +451,56 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
                   </div>
                 )}
 
-                {/* Direct Zalo Contact Box (Clean, Direct, No Message Template) */}
-                <div className="rounded-2xl border-2 border-blue-600/20 bg-blue-50/60 p-5 space-y-4">
+                {/* Direct Zalo & Hotline Box */}
+                <div className="rounded-2xl border-2 border-blue-600/20 bg-blue-50/40 p-6 space-y-5">
                   <div className="flex items-center gap-3.5">
                     <img
                       src={settings.broker_avatar}
                       alt={settings.broker_name}
-                      loading="lazy"
-                      width={56}
-                      height={56}
-                      className="h-14 w-14 rounded-full object-cover border-2 border-blue-600 flex-shrink-0"
+                      className="h-14 w-14 rounded-full object-cover border-2 border-blue-600"
                     />
                     <div>
                       <div className="text-xs font-bold uppercase tracking-wider text-blue-700">
                         Liên Hệ Trực Tiếp
                       </div>
-                      <div className="text-lg font-extrabold text-slate-900">
+                      <div className="font-display text-lg font-extrabold text-slate-900">
                         {settings.broker_name}
                       </div>
-                      <div className="font-tech text-xs sm:text-sm font-semibold text-slate-600">
-                        Zalo / SĐT: {settings.hotline || settings.zalo_phone}
+                      <div className="font-tech text-xs sm:text-sm text-slate-600">
+                        Zalo / SĐT: <strong>{settings.zalo_phone}</strong>
                       </div>
                     </div>
                   </div>
 
-                  {/* Primary CTA Button -> Opens Zalo Immediately */}
                   <a
-                    href={zaloUrl}
+                    href={zaloDirectUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2.5 rounded-xl bg-[#0068FF] px-6 py-4 text-base font-extrabold text-white shadow-lg shadow-blue-600/25 transition hover:bg-[#0055D4] active:scale-[0.99]"
+                    className="w-full flex items-center justify-center gap-2.5 rounded-2xl bg-[#0068FF] hover:bg-[#0055D4] px-6 py-4 text-base font-extrabold text-white shadow-lg shadow-blue-600/25 transition active:scale-[0.99]"
                   >
                     <MessageCircle className="h-5 w-5 fill-current" />
                     <span>Liên Hệ Ngay Qua Zalo ({settings.zalo_phone})</span>
                   </a>
 
-                  <div className="flex items-center justify-between gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <a
-                      href={`tel:${settings.zalo_phone}`}
-                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs sm:text-sm font-bold text-slate-800 transition hover:bg-slate-900 hover:text-white"
+                      href={`tel:${settings.hotline.replace(/\D/g, '')}`}
+                      className={`flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 transition hover:bg-slate-900 hover:text-white ${
+                        !hasMapUrl ? 'sm:col-span-2' : ''
+                      }`}
                     >
-                      <PhoneCall className="h-4 w-4 text-blue-600" />
-                      <span>Gọi Điện: {settings.hotline || settings.zalo_phone}</span>
+                      <Phone className="h-4 w-4 text-blue-600" />
+                      <span>Gọi Điện: {settings.hotline}</span>
                     </a>
+
                     {hasMapUrl && (
                       <a
-                        href={plot.map_url}
+                        href={safeMapUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-white px-4 py-3 text-xs sm:text-sm font-bold text-blue-700 transition hover:bg-blue-50"
+                        className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 transition hover:bg-slate-900 hover:text-white"
                       >
-                        <MapPin className="h-4 w-4" />
+                        <MapPin className="h-4 w-4 text-red-500" />
                         <span>Xem Bản Đồ</span>
                       </a>
                     )}
@@ -726,7 +510,95 @@ export const PlotDetailModal: React.FC<PlotDetailModalProps> = ({
             </div>
           </div>
         </div>
-      </div>
-    </dialog>
+
+        {/* Fullscreen Lightbox Overlay */}
+        {isFullscreen && (
+          <div
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsFullscreen(false);
+              }
+            }}
+            className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-md"
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 text-white">
+              <div className="flex items-center gap-3">
+                <span className="font-tech rounded-lg bg-amber-500 px-2.5 py-1 text-xs font-bold text-slate-950">
+                  {plot.code}
+                </span>
+                <span className="font-bold text-sm sm:text-base truncate max-w-xl">
+                  {plot.title}
+                </span>
+                <span className="text-xs text-slate-400">
+                  ({activeMediaIndex + 1} / {mediaList.length})
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20 cursor-pointer"
+              >
+                <Minimize2 className="h-4 w-4" />
+                <span>Thu nhỏ (ESC)</span>
+              </button>
+            </div>
+
+            <div
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  setIsFullscreen(false);
+                }
+              }}
+              className="relative flex-1 flex items-center justify-center p-4 sm:p-8 overflow-hidden"
+            >
+              {activeMedia.type === 'image' ? (
+                <img
+                  src={activeMedia.url}
+                  alt={plot.title}
+                  className="max-h-[82vh] max-w-[94vw] object-contain rounded-lg shadow-2xl"
+                />
+              ) : (
+                <video
+                  key={`fs-${activeMedia.url}`}
+                  src={`${activeMedia.url}#t=0.1`}
+                  controls
+                  autoPlay
+                  playsInline
+                  width={1920}
+                  height={1080}
+                  className="max-h-[82vh] max-w-[94vw] object-contain rounded-lg shadow-2xl"
+                />
+              )}
+
+              {mediaList.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveMediaIndex(
+                        (prev) => (prev - 1 + mediaList.length) % mediaList.length
+                      )
+                    }
+                    className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/30 cursor-pointer"
+                  >
+                    <ChevronLeft className="h-7 w-7" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveMediaIndex((prev) => (prev + 1) % mediaList.length)
+                    }
+                    className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/30 cursor-pointer"
+                  >
+                    <ChevronRight className="h-7 w-7" />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </dialog>
+    </>
   );
 };

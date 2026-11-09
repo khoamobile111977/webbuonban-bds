@@ -3,6 +3,7 @@ export interface SiteSettings {
   brand_name: string;
   brand_subtitle: string;
   brand_tagline: string;
+  favicon_url: string;
   hero_badge: string;
   hero_title: string;
   hero_subtitle: string;
@@ -46,6 +47,13 @@ export interface SiteSettings {
   cta_badge: string;
   cta_title: string;
   cta_description: string;
+  footer_company_name: string;
+  footer_about: string;
+  footer_tax_code: string;
+  footer_representative: string;
+  footer_working_hours: string;
+  footer_legal_title: string;
+  footer_legal_notice: string;
   footer_copyright: string;
   updated_at?: string;
 }
@@ -84,6 +92,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   brand_name: 'Khoa Mobile',
   brand_subtitle: '',
   brand_tagline: '',
+  favicon_url: '',
   hero_badge: '',
   hero_title: 'Giới Thiệu Các Lô Đất Đang Mở Bán',
   hero_subtitle: '',
@@ -110,7 +119,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   stat_2_label: '',
   stat_3_value: '',
   stat_3_label: '',
-  plots_section_badge: 'DANH MỤC LÔ ĐẤT',
+  plots_section_badge: 'DANH MỤC BẤT ĐỘNG SẢN',
   plots_section_title: 'Danh Sách Các Lô Đất Đang Giới Thiệu',
   plots_section_subtitle: '',
   show_process_section: false,
@@ -127,9 +136,17 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   step_4_desc: 'Thống nhất mức giá và tiến hành các thủ tục giao dịch theo quy định.',
   show_cta_section: true,
   cta_badge: '',
-  cta_title: 'Bạn Cần Tư Vấn Hoặc Tìm Hiểu Thêm Thông Tin?',
+  cta_title: 'Bạn Cần Tư Vấn Hoặc Tìm Lô Đất Phù Hợp?',
   cta_description:
-    'Hãy nhấn nút bên dưới để nhắn tin trực tiếp qua Zalo hoặc gọi điện thoại trao đổi chi tiết.',
+    'Hãy nhắn tin trực tiếp qua Zalo hoặc gọi điện thoại để trao đổi cụ thể về nhu cầu của bạn.',
+  footer_company_name: '',
+  footer_about: '',
+  footer_tax_code: '',
+  footer_representative: '',
+  footer_working_hours: '',
+  footer_legal_title: 'Thông Tin Pháp Lý & Quy Định',
+  footer_legal_notice:
+    'Mọi thông tin, hình ảnh và video lô đất đăng tải trên trang web đều là thông tin thực tế phục vụ khách hàng tham khảo. Quý khách vui lòng liên hệ trực tiếp qua số điện thoại hoặc Zalo chính thức trên website để làm việc trực tiếp.',
   footer_copyright: '',
 };
 

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import {
   Building2,
   CheckCircle2,
@@ -19,14 +18,20 @@ import {
   Plus,
   Save,
   Search,
-  ShieldAlert,
-  ShieldCheck,
   Star,
   Trash2,
   Upload,
-  UserCheck,
   X,
 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  changeAdminPassword,
+  createLandPlot,
+  deleteLandPlot,
+  updateLandPlot,
+  updateSiteSettings,
+  uploadMediaFile,
+} from './supabase';
 import {
   LAND_CATEGORIES,
   LAND_DIRECTIONS,
@@ -34,15 +39,6 @@ import {
   PlotStatus,
   SiteSettings,
 } from './types';
-import {
-  changeAdminCredentials,
-  createLandPlot,
-  deleteLandPlot,
-  fetchAdminUsername,
-  updateLandPlot,
-  updateSiteSettings,
-  uploadMediaFile,
-} from './supabase';
 
 interface AdminPageProps {
   settings: SiteSettings;
@@ -52,7 +48,7 @@ interface AdminPageProps {
 }
 
 const EMPTY_PLOT_FORM: Omit<LandPlot, 'id' | 'created_at'> = {
-  code: 'LO-01',
+  code: '',
   title: '',
   subtitle: '',
   price_display: '',
@@ -63,9 +59,9 @@ const EMPTY_PLOT_FORM: Omit<LandPlot, 'id' | 'created_at'> = {
   direction: '',
   road_width: '',
   legal_status: '',
-  category: 'Đất nền thổ cư',
+  category: LAND_CATEGORIES[0],
   status: 'available',
-  is_featured: false,
+  is_featured: true,
   location_name: '',
   province: '',
   map_url: '',
@@ -90,13 +86,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     message: string;
   } | null>(null);
 
-  // Plot Editor Modal State
+  // Plot Modal Editor State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingPlotId, setEditingPlotId] = useState<string | null>(null);
-  const [editingOriginalPlot, setEditingOriginalPlot] = useState<LandPlot | undefined>(
-    undefined
-  );
-  const [plotForm, setPlotForm] = useState<Omit<LandPlot, 'id' | 'created_at'>>(EMPTY_PLOT_FORM);
+  const [editingOriginalPlot, setEditingOriginalPlot] = useState<LandPlot | null>(null);
+  const [plotForm, setPlotForm] =
+    useState<Omit<LandPlot, 'id' | 'created_at'>>(EMPTY_PLOT_FORM);
   const [highlightsText, setHighlightsText] = useState('');
   const [newImageUrl, setNewImageUrl] = useState('');
   const [newVideoUrl, setNewVideoUrl] = useState('');
@@ -108,40 +103,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [savingSettings, setSavingSettings] = useState(false);
   const [uploadingSiteImage, setUploadingSiteImage] = useState(false);
 
-  // Security / Password Change State
-  const [currentAdminUser, setCurrentAdminUser] = useState('admin');
+  // Admin Password Change State (Password only, no username field)
   const [oldPassword, setOldPassword] = useState('');
-  const [newUsername, setNewUsername] = useState('admin');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [showPasswords, setShowPasswords] = useState(false);
+  const [showAdminPasswords, setShowAdminPasswords] = useState(false);
   const [savingCredentials, setSavingCredentials] = useState(false);
 
   useEffect(() => {
     setSettingsForm(settings);
   }, [settings]);
 
-  useEffect(() => {
-    fetchAdminUsername().then((u) => {
-      setCurrentAdminUser(u);
-      setNewUsername(u);
-    });
-  }, []);
-
   const showNotice = (type: 'success' | 'error', message: string) => {
     setBannerNotice({ type, message });
-    setTimeout(() => setBannerNotice(null), 4500);
+    setTimeout(() => {
+      setBannerNotice((prev) => (prev?.message === message ? null : prev));
+    }, 4500);
   };
 
   const openCreateModal = () => {
-    const nextNum = String(plots.length + 1).padStart(2, '0');
-    const freshForm: Omit<LandPlot, 'id' | 'created_at'> = {
-      ...EMPTY_PLOT_FORM,
-      code: `LO-${nextNum}`,
-    };
     setEditingPlotId(null);
-    setEditingOriginalPlot(undefined);
-    setPlotForm(freshForm);
+    setEditingOriginalPlot(null);
+    setPlotForm({
+      ...EMPTY_PLOT_FORM,
+      code: `LK-${String(plots.length + 1).padStart(2, '0')}`,
+    });
     setHighlightsText('');
     setNewImageUrl('');
     setNewVideoUrl('');
@@ -184,16 +170,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-
     setUploadingMedia(true);
-    const uploadedUrls: string[] = [];
 
-    for (const file of Array.from(files)) {
-      const { url, error } = await uploadMediaFile(file, 'images');
+    const uploadedUrls: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const { url, error } = await uploadMediaFile(files[i], 'images');
       if (url) {
         uploadedUrls.push(url);
       } else if (error) {
-        showNotice('error', `Lỗi tải ảnh ${file.name}: ${error}`);
+        showNotice('error', `Lỗi tải ảnh: ${error}`);
       }
     }
 
@@ -202,7 +187,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         ...prev,
         images: [...prev.images, ...uploadedUrls],
       }));
-      showNotice('success', `Đã tải lên thành công ${uploadedUrls.length} hình ảnh!`);
+      showNotice('success', `Đã tải lên ${uploadedUrls.length} hình ảnh.`);
     }
     setUploadingMedia(false);
     e.target.value = '';
@@ -211,16 +196,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-
     setUploadingMedia(true);
-    const uploadedUrls: string[] = [];
 
-    for (const file of Array.from(files)) {
-      const { url, error } = await uploadMediaFile(file, 'videos');
+    const uploadedUrls: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const { url, error } = await uploadMediaFile(files[i], 'videos');
       if (url) {
         uploadedUrls.push(url);
       } else if (error) {
-        showNotice('error', `Lỗi tải video ${file.name}: ${error}`);
+        showNotice('error', `Lỗi tải video: ${error}`);
       }
     }
 
@@ -229,7 +213,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         ...prev,
         videos: [...prev.videos, ...uploadedUrls],
       }));
-      showNotice('success', `Đã tải lên thành công ${uploadedUrls.length} video!`);
+      showNotice('success', `Đã tải lên ${uploadedUrls.length} video.`);
     }
     setUploadingMedia(false);
     e.target.value = '';
@@ -277,10 +261,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       } else {
         await onRefreshData();
         setIsEditorOpen(false);
-        showNotice(
-          'success',
-          `Đã ghi đè cập nhật lô đất ${payload.code} và dọn dẹp file cũ thành công!`
-        );
+        showNotice('success', `Đã cập nhật lô đất ${payload.code} thành công.`);
       }
     } else {
       const { error } = await createLandPlot(payload);
@@ -289,7 +270,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       } else {
         await onRefreshData();
         setIsEditorOpen(false);
-        showNotice('success', `Đã thêm lô đất mới ${payload.code} thành công!`);
+        showNotice('success', `Đã thêm lô đất mới ${payload.code} thành công.`);
       }
     }
     setSavingPlot(false);
@@ -301,7 +282,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showNotice('error', `Lỗi đổi trạng thái: ${error}`);
     } else {
       await onRefreshData();
-      showNotice('success', `Đã cập nhật trạng thái lô ${plot.code}!`);
+      showNotice('success', `Đã cập nhật trạng thái lô ${plot.code}.`);
     }
   };
 
@@ -312,15 +293,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showNotice(
         'success',
         plot.is_featured
-          ? `Đã bỏ đánh dấu nổi bật lô ${plot.code}`
-          : `Đã ghim lô ${plot.code} lên đầu trang!`
+          ? `Đã bỏ ghim nổi bật lô ${plot.code}.`
+          : `Đã ghim nổi bật lô ${plot.code}.`
       );
     }
   };
 
   const handleDeletePlot = async (plot: LandPlot) => {
     const confirmed = window.confirm(
-      `Bạn có chắc chắn muốn xóa vĩnh viễn lô đất "${plot.code} - ${plot.title}" cùng toàn bộ hình ảnh/video của lô này khỏi cơ sở dữ liệu không?`
+      `Xác nhận xóa vĩnh viễn lô đất "${plot.code} - ${plot.title}"?`
     );
     if (!confirmed) return;
 
@@ -329,16 +310,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showNotice('error', `Lỗi xóa lô đất: ${error}`);
     } else {
       await onRefreshData();
-      showNotice(
-        'success',
-        `Đã xóa sạch lô đất ${plot.code} cùng toàn bộ hình ảnh/video khỏi Database & Storage.`
-      );
+      showNotice('success', `Đã xóa lô đất ${plot.code}.`);
     }
   };
 
   const handleSiteAssetUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    field: 'broker_avatar' | 'hero_image'
+    field: 'broker_avatar' | 'hero_image' | 'favicon_url'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -346,7 +324,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     const { url, error } = await uploadMediaFile(file, 'site');
     if (url) {
       setSettingsForm((prev) => ({ ...prev, [field]: url }));
-      showNotice('success', 'Đã tải ảnh lên thành công! Nhấn "Lưu Toàn Bộ Cấu Hình" để áp dụng.');
+      showNotice('success', 'Đã tải ảnh lên. Nhấn "Lưu Cấu Hình" để áp dụng.');
     } else if (error) {
       showNotice('error', `Lỗi tải ảnh: ${error}`);
     }
@@ -362,36 +340,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showNotice('error', `Lỗi lưu cài đặt: ${error}`);
     } else {
       await onRefreshData();
-      showNotice('success', 'Đã ghi đè cập nhật toàn bộ thông tin trang web thành công!');
+      showNotice('success', 'Đã lưu toàn bộ thông tin trang web.');
     }
     setSavingSettings(false);
   };
 
-  const handleChangeCredentials = async (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldPassword) {
-      showNotice('error', 'Vui lòng nhập mật khẩu cũ (mật khẩu hiện tại) để xác thực.');
+      showNotice('error', 'Vui lòng nhập mật khẩu hiện tại.');
       return;
     }
-    if (newPassword.length < 6) {
-      showNotice('error', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
+    if (newPassword.length < 8) {
+      showNotice('error', 'Mật khẩu mới phải có ít nhất 8 ký tự.');
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      showNotice('error', 'Mật khẩu mới và xác nhận mật khẩu mới không khớp.');
+      showNotice('error', 'Mật khẩu mới và nhập lại mật khẩu mới không khớp.');
       return;
     }
 
     setSavingCredentials(true);
-    const result = await changeAdminCredentials(oldPassword, newUsername.trim(), newPassword);
+    const result = await changeAdminPassword(oldPassword, newPassword);
     if (!result.success) {
-      showNotice('error', result.error || 'Không thể đổi mật khẩu. Vui lòng kiểm tra lại.');
+      showNotice('error', result.error || 'Không thể đổi mật khẩu.');
     } else {
-      setCurrentAdminUser(result.username || newUsername.trim());
       setOldPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
-      showNotice('success', 'Đã cập nhật tài khoản và mật khẩu Admin thành công!');
+      showNotice('success', 'Đã đổi mật khẩu thành công.');
     }
     setSavingCredentials(false);
   };
@@ -402,7 +379,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     return (
       (p.code || '').toLowerCase().includes(q) ||
       (p.title || '').toLowerCase().includes(q) ||
-      (p.location_name || '').toLowerCase().includes(q)
+      (p.location_name || '').toLowerCase().includes(q) ||
+      (p.province || '').toLowerCase().includes(q)
     );
   });
 
@@ -414,20 +392,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 flex flex-col">
-      {/* Top Admin Navbar */}
-      <header className="sticky top-0 z-30 bg-[#0F172A] text-white border-b border-slate-800 shadow-md">
-        <div className="mx-auto max-w-[1600px] px-4 sm:px-8 h-20 flex items-center justify-between gap-4">
+    <div className="min-h-screen w-full bg-[#F1F5F9] text-slate-900 flex flex-col">
+      {/* Top Admin Navbar - Full Width */}
+      <header className="sticky top-0 z-30 w-full bg-[#0F172A] text-white border-b border-slate-800 shadow-md">
+        <div className="w-full px-4 sm:px-6 lg:px-10 h-20 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30">
               <Building2 className="h-6 w-6" />
             </div>
             <div>
               <div className="font-display text-lg sm:text-xl font-extrabold text-white leading-tight">
-                HỆ THỐNG QUẢN TRỊ · {settings.brand_name}
+                QUẢN TRỊ · {settings.brand_name}
               </div>
               <div className="text-xs text-amber-400 font-semibold mt-0.5">
-                Zalo nhận khách: {settings.zalo_phone} · Tổng cộng {plots.length} lô đất
+                Zalo: {settings.zalo_phone}
               </div>
             </div>
           </div>
@@ -469,8 +447,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         </div>
       )}
 
-      {/* Main Wide Content Area */}
-      <main className="mx-auto max-w-[1600px] w-full px-4 sm:px-8 py-8 space-y-8 flex-1">
+      {/* Main Full-Width Content Area (No wasted left/right margins) */}
+      <main className="w-full px-4 sm:px-6 lg:px-10 py-6 sm:py-8 space-y-6 flex-1">
         {/* Top Action & Navigation Bar */}
         <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -484,7 +462,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               }`}
             >
               <LayoutDashboard className="h-4 w-4" />
-              <span>1. Quản Lý Lô Đất & Hình Ảnh/Video ({plots.length})</span>
+              <span>1. Quản Lý Lô Đất ({plots.length})</span>
             </button>
 
             <button
@@ -500,7 +478,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               }`}
             >
               <Globe className="h-4 w-4" />
-              <span>2. Tùy Chỉnh Toàn Bộ Trang Web & Zalo</span>
+              <span>2. Tùy Chỉnh Trang Web & Zalo</span>
             </button>
 
             <button
@@ -513,7 +491,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               }`}
             >
               <KeyRound className="h-4 w-4" />
-              <span>3. Đổi Tài Khoản & Mật Khẩu Admin</span>
+              <span>3. Đổi Mật Khẩu Admin</span>
             </button>
           </div>
 
@@ -533,247 +511,243 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         {activeTab === 'plots' && (
           <div className="space-y-6">
             {/* Quick Summary Cards */}
-            <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs">
                 <span className="text-xs sm:text-sm font-bold text-slate-500 uppercase tracking-wider">
                   Tổng Số Lô Đất
                 </span>
-                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-slate-900 mt-2">
+                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-slate-900 mt-1.5">
                   {stats.total}
                 </div>
               </div>
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
                 <span className="text-xs sm:text-sm font-bold text-emerald-800 uppercase tracking-wider">
                   Đang Mở Bán
                 </span>
-                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-emerald-700 mt-2">
+                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-emerald-700 mt-1.5">
                   {stats.available}
                 </div>
               </div>
-              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-6">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5">
                 <span className="text-xs sm:text-sm font-bold text-amber-800 uppercase tracking-wider">
                   Đã Nhận Cọc
                 </span>
-                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-amber-700 mt-2">
+                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-amber-700 mt-1.5">
                   {stats.reserved}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-300 bg-slate-200/60 p-6">
+              <div className="rounded-2xl border border-slate-300 bg-slate-200/60 p-5">
                 <span className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider">
                   Đã Giao Dịch
                 </span>
-                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-slate-800 mt-2">
+                <div className="font-tech text-3xl sm:text-4xl font-extrabold text-slate-800 mt-1.5">
                   {stats.sold}
                 </div>
               </div>
             </div>
 
             {/* Search Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-              <div className="relative flex-1">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="relative w-full">
                 <Search className="h-4 w-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Tìm nhanh theo mã lô, tiêu đề hoặc khu vực..."
+                  placeholder="Tìm theo mã lô, tiêu đề hoặc khu vực..."
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 py-3 text-sm font-medium focus:border-blue-600 focus:bg-white focus:outline-none"
                 />
               </div>
-              <div className="text-xs sm:text-sm text-slate-600">
-                Khi xóa lô đất, toàn bộ <strong className="text-slate-900">hình ảnh & video</strong> của lô đó cũng được xóa sạch khỏi đám mây.
-              </div>
             </div>
 
-            {/* Plots List Table */}
-            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xs">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-900 text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
-                      <th className="py-4 px-5">Ảnh / Mã Lô</th>
-                      <th className="py-4 px-5">Thông Tin Lô Đất</th>
-                      <th className="py-4 px-5">Giá Bán & Diện Tích</th>
-                      <th className="py-4 px-5">Hình Ảnh / Video</th>
-                      <th className="py-4 px-5">Trạng Thái</th>
-                      <th className="py-4 px-5 text-right">Thao Tác</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 text-sm sm:text-base">
-                    {filteredPlots.map((plot) => {
-                      const subSpecs = [
-                        plot.category,
-                        plot.direction ? `Hướng ${plot.direction}` : '',
-                        plot.road_width || '',
-                        plot.legal_status || '',
-                      ].filter(Boolean);
+            {/* Plots List Table - Fixed Layout on Desktop so ZERO horizontal scrollbar */}
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label="Danh sách quản lý lô đất"
+              className="w-full overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-xs"
+            >
+              <table className="w-full lg:table-fixed text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-900 text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
+                    <th className="py-4 px-4 lg:w-[190px]">Ảnh / Mã Lô</th>
+                    <th className="py-4 px-4 lg:w-[33%]">Thông Tin Lô Đất</th>
+                    <th className="py-4 px-4 lg:w-[17%]">Giá Bán & Diện Tích</th>
+                    <th className="py-4 px-4 lg:w-[160px]">Hình Ảnh / Video</th>
+                    <th className="py-4 px-4 lg:w-[155px]">Trạng Thái</th>
+                    <th className="py-4 px-4 lg:w-[180px] text-right">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-sm sm:text-base">
+                  {filteredPlots.map((plot) => {
+                    const subSpecs = [
+                      plot.category,
+                      plot.direction ? `Hướng ${plot.direction}` : '',
+                      plot.road_width || '',
+                      plot.legal_status || '',
+                    ].filter(Boolean);
 
-                      return (
-                        <tr key={plot.id} className="hover:bg-slate-50 transition">
-                          <td className="py-4 px-5 whitespace-nowrap min-w-[200px]">
-                            <div className="flex items-center gap-3.5">
-                              <img
-                                src={
-                                  plot.images?.[0] ||
-                                  'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=400&q=80'
-                                }
-                                alt={plot.code}
-                                className="h-16 w-24 flex-shrink-0 rounded-xl object-cover border border-slate-200"
-                              />
-                              <div className="flex-shrink-0">
-                                <span className="font-tech rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-bold text-amber-400">
-                                  {plot.code}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleFeatured(plot)}
-                                  title="Bấm để ghim/bỏ ghim Lô Nổi Bật"
-                                  className={`mt-2 flex items-center gap-1 text-xs font-bold cursor-pointer ${
-                                    plot.is_featured
-                                      ? 'text-amber-600'
-                                      : 'text-slate-400 hover:text-slate-700'
-                                  }`}
-                                >
-                                  <Star
-                                    className={`h-4 w-4 ${
-                                      plot.is_featured ? 'fill-amber-500 text-amber-500' : ''
-                                    }`}
-                                  />
-                                  {plot.is_featured ? 'Lô Nổi Bật' : 'Ghim nổi bật'}
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="py-4 px-5 max-w-xl">
-                            <div className="font-bold text-slate-900 text-base line-clamp-1">
-                              {plot.title}
-                            </div>
-                            {(plot.location_name || plot.province) && (
-                              <div className="text-xs sm:text-sm text-blue-700 font-semibold flex items-center gap-1 mt-1">
-                                <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="truncate">
-                                  {plot.location_name}
-                                  {plot.province ? `, ${plot.province}` : ''}
-                                </span>
-                              </div>
-                            )}
-                            {subSpecs.length > 0 && (
-                              <div className="text-xs text-slate-500 mt-1">
-                                {subSpecs.join(' · ')}
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="py-4 px-5 whitespace-nowrap">
-                            <div className="font-tech text-base font-extrabold text-blue-700">
-                              {plot.price_display?.trim() || 'Liên hệ để trao đổi'}
-                            </div>
-                            {(plot.area_m2 > 0 || plot.dimensions?.trim()) && (
-                              <div className="font-tech text-xs sm:text-sm text-slate-600 mt-0.5">
-                                {plot.area_m2 > 0 ? `${plot.area_m2} m²` : ''}
-                                {plot.area_m2 > 0 && plot.dimensions?.trim()
-                                  ? ` (${plot.dimensions.trim()})`
-                                  : plot.dimensions?.trim() || ''}
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="py-4 px-5 whitespace-nowrap text-xs sm:text-sm">
-                            <div className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 font-bold text-slate-700 mr-2">
-                              <ImageIcon className="h-4 w-4 text-blue-600" />
-                              {plot.images?.length || 0} ảnh
-                            </div>
-                            <div className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 font-bold text-slate-700">
-                              <Film className="h-4 w-4 text-red-600" />
-                              {plot.videos?.length || 0} video
-                            </div>
-                          </td>
-
-                          <td className="py-4 px-5 whitespace-nowrap">
-                            <select
-                              value={plot.status}
-                              onChange={(e) =>
-                                handleQuickStatusChange(plot, e.target.value as PlotStatus)
+                    return (
+                      <tr key={plot.id} className="hover:bg-slate-50 transition">
+                        <td className="py-4 px-4 align-middle">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={
+                                plot.images?.[0] ||
+                                'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=400&q=80'
                               }
-                              aria-label={`Trạng thái lô ${plot.code}`}
-                              className={`rounded-xl border px-3.5 py-2 text-xs sm:text-sm font-bold focus:outline-none cursor-pointer ${
-                                plot.status === 'available'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                  : plot.status === 'reserved'
-                                  ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                  : 'bg-slate-200 text-slate-700 border-slate-300'
-                              }`}
-                            >
-                              <option value="available">Đang mở bán</option>
-                              <option value="reserved">Đã nhận cọc</option>
-                              <option value="sold">Đã bán</option>
-                            </select>
-                          </td>
-
-                          <td className="py-4 px-5 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-2">
+                              alt={plot.code}
+                              className="h-14 w-20 flex-shrink-0 rounded-xl object-cover border border-slate-200"
+                            />
+                            <div className="min-w-0">
+                              <span className="font-tech inline-block rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-bold text-amber-400">
+                                {plot.code}
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => openEditModal(plot)}
-                                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-blue-700 cursor-pointer"
+                                onClick={() => handleToggleFeatured(plot)}
+                                className={`mt-1.5 flex items-center gap-1 text-xs font-bold cursor-pointer ${
+                                  plot.is_featured
+                                    ? 'text-amber-600'
+                                    : 'text-slate-400 hover:text-slate-700'
+                                }`}
                               >
-                                <Edit3 className="h-4 w-4" />
-                                Sửa / Ảnh & Video
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePlot(plot)}
-                                className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 p-2.5 text-red-600 hover:bg-red-600 hover:text-white cursor-pointer"
-                                title="Xóa sạch lô đất và file ảnh/video"
-                              >
-                                <Trash2 className="h-4 w-4" />
+                                <Star
+                                  className={`h-3.5 w-3.5 flex-shrink-0 ${
+                                    plot.is_featured ? 'fill-amber-500 text-amber-500' : ''
+                                  }`}
+                                />
+                                <span className="truncate">
+                                  {plot.is_featured ? 'Lô Nổi Bật' : 'Ghim nổi bật'}
+                                </span>
                               </button>
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-4 align-middle break-words">
+                          <div className="font-bold text-slate-900 text-base line-clamp-1">
+                            {plot.title}
+                          </div>
+                          {(plot.location_name || plot.province) && (
+                            <div className="text-xs sm:text-sm text-blue-700 font-semibold flex items-center gap-1 mt-1 min-w-0">
+                              <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
+                              <span className="truncate">
+                                {[plot.location_name, plot.province].filter(Boolean).join(', ')}
+                              </span>
+                            </div>
+                          )}
+                          {subSpecs.length > 0 && (
+                            <div className="text-xs text-slate-500 mt-1 line-clamp-1">
+                              {subSpecs.join(' · ')}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-4 px-4 align-middle break-words">
+                          <div className="font-tech text-base font-extrabold text-blue-700">
+                            {plot.price_display?.trim() || 'Liên hệ để trao đổi'}
+                          </div>
+                          {(plot.area_m2 > 0 || plot.dimensions?.trim()) && (
+                            <div className="font-tech text-xs sm:text-sm text-slate-600 mt-0.5">
+                              {plot.area_m2 > 0 ? `${plot.area_m2} m²` : ''}
+                              {plot.area_m2 > 0 && plot.dimensions?.trim()
+                                ? ` (${plot.dimensions.trim()})`
+                                : plot.dimensions?.trim() || ''}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-4 px-4 align-middle text-xs">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 font-bold text-slate-700">
+                              <ImageIcon className="h-3.5 w-3.5 text-blue-600" />
+                              {plot.images?.length || 0} ảnh
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 font-bold text-slate-700">
+                              <Film className="h-3.5 w-3.5 text-red-600" />
+                              {plot.videos?.length || 0} video
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-4 align-middle">
+                          <select
+                            value={plot.status}
+                            onChange={(e) =>
+                              handleQuickStatusChange(plot, e.target.value as PlotStatus)
+                            }
+                            aria-label={`Trạng thái lô ${plot.code}`}
+                            className={`w-full rounded-xl border px-3 py-2 text-xs sm:text-sm font-bold focus:outline-none cursor-pointer ${
+                              plot.status === 'available'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : plot.status === 'reserved'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-slate-200 text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            <option value="available">Đang mở bán</option>
+                            <option value="reserved">Đã nhận cọc</option>
+                            <option value="sold">Đã bán</option>
+                          </select>
+                        </td>
+
+                        <td className="py-4 px-4 align-middle text-right">
+                          <div className="inline-flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(plot)}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-blue-700 cursor-pointer"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                              <span>Sửa</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePlot(plot)}
+                              className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 p-2.5 text-red-600 hover:bg-red-600 hover:text-white cursor-pointer"
+                              aria-label={`Xóa lô ${plot.code}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
 
-        {/* TAB 2: CUSTOMIZE ALL WEBSITE CONTENT & ZALO */}
+        {/* TAB 2: FULL WEBSITE & LEGAL FOOTER CUSTOMIZATION */}
         {activeTab === 'settings' && (
-          <form onSubmit={handleSaveSiteSettings} className="space-y-8">
-            <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900 flex items-center justify-between gap-4">
-              <div>
-                <strong>Mẹo tùy chỉnh:</strong> Mọi ô thông tin bên dưới nếu bạn <strong>xóa trống</strong> thì phần đó sẽ tự động ẩn đi trên trang khách hàng (tuyệt đối không tự điền hay tự viết cam kết).
-              </div>
+          <form onSubmit={handleSaveSiteSettings} className="space-y-6">
+            <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={savingSettings}
-                className="flex-shrink-0 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                disabled={savingSettings || uploadingSiteImage}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-7 py-3.5 text-sm font-extrabold text-white shadow-md hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
               >
                 <Save className="h-4 w-4" />
                 <span>{savingSettings ? 'Đang lưu...' : 'Lưu Toàn Bộ Cấu Hình'}</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-8 xl:grid-cols-12">
-              {/* Left Column: Personal Profile, Broker Card & Zalo */}
-              <div className="xl:col-span-6 space-y-8">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+              {/* Left Column: Broker Profile, Contact & Legal Business Footer */}
+              <div className="xl:col-span-6 space-y-6">
                 {/* Card 1: Broker Profile & Zalo */}
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-6">
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-5">
                   <div className="border-b border-slate-100 pb-4">
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
-                      Phần 1 · Thông Tin Cá Nhân & Liên Hệ
-                    </span>
-                    <h2 className="font-display text-2xl font-extrabold text-slate-900 mt-1">
-                      Hồ Sơ Của Bạn & Số Điện Thoại Zalo
+                    <h2 className="font-display text-xl sm:text-2xl font-extrabold text-slate-900">
+                      1. Hồ Sơ Cá Nhân & Số Điện Thoại Zalo
                     </h2>
                   </div>
 
-                  {/* Broker Avatar Upload */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  {/* Avatar Upload */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
                     <img
                       src={settingsForm.broker_avatar}
                       alt={settingsForm.broker_name}
@@ -781,10 +755,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     />
                     <div className="space-y-2 flex-1 w-full">
                       <label className="block text-xs font-bold text-slate-800">
-                        Ảnh Đại Diện Của Bạn (Khi đổi ảnh mới, ảnh cũ trên đám mây sẽ tự động xóa)
+                        Ảnh Đại Diện
                       </label>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white cursor-pointer hover:bg-slate-800">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <label className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white cursor-pointer hover:bg-slate-800">
                           <Upload className="h-3.5 w-3.5" />
                           <span>{uploadingSiteImage ? 'Đang tải...' : 'Tải ảnh từ máy'}</span>
                           <input
@@ -800,14 +774,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           onChange={(e) =>
                             setSettingsForm({ ...settingsForm, broker_avatar: e.target.value })
                           }
-                          placeholder="Hoặc dán link ảnh..."
-                          className="flex-1 min-w-[180px] rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs"
+                          placeholder="Link ảnh đại diện..."
+                          className="flex-1 min-w-[180px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
                         Tên Của Bạn
@@ -821,9 +795,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-bold"
                       />
                     </div>
+
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Danh Xưng / Chức Danh (Để trống sẽ ẩn)
+                        Danh Xưng / Chức Danh
                       </label>
                       <input
                         type="text"
@@ -831,7 +806,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         onChange={(e) =>
                           setSettingsForm({ ...settingsForm, broker_title: e.target.value })
                         }
-                        placeholder="VD: Chuyên viên tư vấn BĐS"
                         className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                       />
                     </div>
@@ -839,7 +813,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nhãn Nhỏ Phía Trên Tên Trong Thẻ Cá Nhân (Để trống sẽ ẩn)
+                      Nhãn Phía Trên Tên Trong Thẻ Cá Nhân
                     </label>
                     <input
                       type="text"
@@ -847,15 +821,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setSettingsForm({ ...settingsForm, broker_role_badge: e.target.value })
                       }
-                      placeholder="Để trống nếu không muốn hiển thị nhãn"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-blue-50/70 border border-blue-200">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 p-4 rounded-2xl bg-blue-50/60 border border-blue-200">
                     <div>
-                      <label className="block text-xs font-extrabold text-blue-700 mb-1.5">
-                        Số Điện Thoại Zalo (Chuyển hướng khách)
+                      <label className="block text-xs font-bold text-blue-800 mb-1.5">
+                        Số Điện Thoại Zalo
                       </label>
                       <input
                         type="tel"
@@ -863,32 +836,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         onChange={(e) =>
                           setSettingsForm({ ...settingsForm, zalo_phone: e.target.value })
                         }
-                        placeholder="VD: 0823195002"
-                        className="w-full rounded-xl border border-blue-300 bg-white px-3.5 py-2.5 text-sm font-tech font-bold text-slate-900"
+                        className="w-full rounded-xl border border-blue-400 bg-white px-3.5 py-2.5 text-base font-tech font-extrabold text-slate-900"
                       />
-                      <span className="text-[11px] text-slate-500 mt-1 block">
-                        Link đích: https://zalo.me/{settingsForm.zalo_phone.replace(/[^0-9]/g, '')}
-                      </span>
                     </div>
+
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
                         Số Điện Thoại / Hotline Hiển Thị
                       </label>
                       <input
-                        type="text"
+                        type="tel"
                         value={settingsForm.hotline}
                         onChange={(e) =>
                           setSettingsForm({ ...settingsForm, hotline: e.target.value })
                         }
-                        placeholder="VD: 0823 195 002"
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-tech font-bold"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-base font-tech font-bold text-slate-900"
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Lời Giới Thiệu Bản Thân (Để trống sẽ ẩn)
+                      Lời Giới Thiệu Bản Thân
                     </label>
                     <textarea
                       rows={3}
@@ -896,15 +865,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setSettingsForm({ ...settingsForm, broker_bio: e.target.value })
                       }
-                      placeholder="Nhập lời giới thiệu bản thân của bạn (hoặc xóa trống để ẩn)..."
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3.5 text-sm"
                     />
                   </div>
 
-                  {/* Custom Info Lines inside Broker Card */}
                   <div className="space-y-3 pt-2 border-t border-slate-100">
                     <label className="block text-xs font-bold text-slate-800">
-                      Các Dòng Thông Tin Thêm Trong Thẻ Cá Nhân (Để trống sẽ ẩn hoàn toàn)
+                      Thông Tin Bổ Sung Trong Thẻ Cá Nhân
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <input
@@ -916,7 +883,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             broker_info_1_label: e.target.value,
                           })
                         }
-                        placeholder="Nhãn dòng 1 (VD: Thời gian làm việc:)"
+                        placeholder="Tiêu đề dòng 1"
                         className="rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs sm:text-sm"
                       />
                       <input
@@ -928,7 +895,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             broker_info_1_value: e.target.value,
                           })
                         }
-                        placeholder="Nội dung dòng 1 (VD: Hỗ trợ 24/7)"
+                        placeholder="Nội dung dòng 1"
                         className="rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs sm:text-sm font-semibold"
                       />
                     </div>
@@ -943,7 +910,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             broker_info_2_label: e.target.value,
                           })
                         }
-                        placeholder="Nhãn dòng 2 (Để trống nếu không dùng)"
+                        placeholder="Tiêu đề dòng 2"
                         className="rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs sm:text-sm"
                       />
                       <input
@@ -964,7 +931,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Địa Chỉ / Khu Vực Hoạt Động (Để trống sẽ ẩn)
+                        Địa Chỉ / Khu Vực
                       </label>
                       <input
                         type="text"
@@ -977,7 +944,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Email Liên Hệ (Để trống sẽ ẩn)
+                        Email Liên Hệ
                       </label>
                       <input
                         type="email"
@@ -991,57 +958,111 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   </div>
                 </div>
 
-                {/* Card 2: Bottom CTA & Footer */}
+                {/* Card 2: Complete Legal Business Footer & Bottom CTA */}
                 <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-5">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                  <div className="border-b border-slate-100 pb-4">
+                    <h2 className="font-display text-xl sm:text-2xl font-extrabold text-slate-900">
+                      2. Tùy Chỉnh Chân Trang (Footer Chuẩn Website Kinh Doanh)
+                    </h2>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
-                        Phần 2 · Cuối Trang Web (Footer & Liên Hệ Cuối Trang)
-                      </span>
-                      <h2 className="font-display text-2xl font-extrabold text-slate-900 mt-1">
-                        Khối Mời Liên Hệ Cuối Trang & Bản Quyền
-                      </h2>
-                    </div>
-                    <label className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-800 cursor-pointer">
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Tên Đơn Vị / Thương Hiệu Ở Chân Trang
+                      </label>
                       <input
-                        type="checkbox"
-                        checked={Boolean(settingsForm.show_cta_section)}
+                        type="text"
+                        value={settingsForm.footer_company_name || ''}
                         onChange={(e) =>
                           setSettingsForm({
                             ...settingsForm,
-                            show_cta_section: e.target.checked,
+                            footer_company_name: e.target.value,
                           })
                         }
-                        className="h-4 w-4 rounded accent-blue-600"
+                        placeholder={settingsForm.brand_name}
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-bold"
                       />
-                      <span>Hiển thị khối này</span>
-                    </label>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Người Đại Diện / Phụ Trách
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.footer_representative || ''}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            footer_representative: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Mã Số Thuế / Số GPKD / Chứng Chỉ
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.footer_tax_code || ''}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            footer_tax_code: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Giờ Làm Việc
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.footer_working_hours || ''}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            footer_working_hours: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
+                      />
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nhãn Nhỏ Phía Trên Khối Liên Hệ Cuối Trang (Để trống sẽ ẩn)
+                      Giới Thiệu Ngắn Ở Chân Trang
                     </label>
-                    <input
-                      type="text"
-                      value={settingsForm.cta_badge || ''}
+                    <textarea
+                      rows={2}
+                      value={settingsForm.footer_about || ''}
                       onChange={(e) =>
-                        setSettingsForm({ ...settingsForm, cta_badge: e.target.value })
+                        setSettingsForm({ ...settingsForm, footer_about: e.target.value })
                       }
-                      placeholder="Để trống nếu không dùng"
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Tiêu Đề Khối Liên Hệ Cuối Trang
+                      Tiêu Đề Cột Pháp Lý & Quy Định Ở Chân Trang
                     </label>
                     <input
                       type="text"
-                      value={settingsForm.cta_title || ''}
+                      value={settingsForm.footer_legal_title || ''}
                       onChange={(e) =>
-                        setSettingsForm({ ...settingsForm, cta_title: e.target.value })
+                        setSettingsForm({
+                          ...settingsForm,
+                          footer_legal_title: e.target.value,
+                        })
                       }
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-bold"
                     />
@@ -1049,21 +1070,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nội Dung Mô Tả Khối Liên Hệ Cuối Trang
+                      Nội Dung Pháp Lý, Chính Sách & Quy Định Ở Chân Trang
                     </label>
                     <textarea
                       rows={3}
-                      value={settingsForm.cta_description || ''}
+                      value={settingsForm.footer_legal_notice || ''}
                       onChange={(e) =>
-                        setSettingsForm({ ...settingsForm, cta_description: e.target.value })
+                        setSettingsForm({
+                          ...settingsForm,
+                          footer_legal_notice: e.target.value,
+                        })
                       }
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3.5 text-sm"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Dòng Bản Quyền Dưới Cùng (Footer Copyright)
+                      Dòng Bản Quyền Dưới Cùng
                     </label>
                     <input
                       type="text"
@@ -1071,30 +1095,112 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setSettingsForm({ ...settingsForm, footer_copyright: e.target.value })
                       }
-                      placeholder={`© ${new Date().getFullYear()} ${settingsForm.brand_name}.`}
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                     />
+                  </div>
+
+                  {/* Bottom CTA Section Toggle & Fields */}
+                  <div className="pt-4 border-t border-slate-100 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-extrabold text-slate-900">
+                        Khối Mời Liên Hệ Cuối Trang
+                      </span>
+                      <label className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(settingsForm.show_cta_section)}
+                          onChange={(e) =>
+                            setSettingsForm({
+                              ...settingsForm,
+                              show_cta_section: e.target.checked,
+                            })
+                          }
+                          className="h-4 w-4 rounded accent-blue-600"
+                        />
+                        <span>Hiển thị</span>
+                      </label>
+                    </div>
+
+                    {settingsForm.show_cta_section && (
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          value={settingsForm.cta_badge || ''}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, cta_badge: e.target.value })
+                          }
+                          placeholder="Nhãn nhỏ phía trên"
+                          className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-sm"
+                        />
+                        <input
+                          type="text"
+                          value={settingsForm.cta_title || ''}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, cta_title: e.target.value })
+                          }
+                          placeholder="Tiêu đề khối liên hệ"
+                          className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-sm font-bold"
+                        />
+                        <textarea
+                          rows={2}
+                          value={settingsForm.cta_description || ''}
+                          onChange={(e) =>
+                            setSettingsForm({
+                              ...settingsForm,
+                              cta_description: e.target.value,
+                            })
+                          }
+                          placeholder="Nội dung khối liên hệ"
+                          className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Right Column: Header, Hero Banner, Plots Heading & Optional 4-Step Process */}
-              <div className="xl:col-span-6 space-y-8">
-                {/* Card 3: Header & Hero Banner */}
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-6">
+              {/* Right Column: Brand, Favicon, Hero Banner & 4-Step Process */}
+              <div className="xl:col-span-6 space-y-6">
+                {/* Card 3: Brand, Favicon & Hero Banner */}
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-5">
                   <div className="border-b border-slate-100 pb-4">
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
-                      Phần 3 · Thương Hiệu & Banner Đầu Trang
-                    </span>
-                    <h2 className="font-display text-2xl font-extrabold text-slate-900 mt-1">
-                      Tùy Chỉnh Header, Tiêu Đề Lớn & Danh Sách Lô Đất
+                    <h2 className="font-display text-xl sm:text-2xl font-extrabold text-slate-900">
+                      3. Thương Hiệu, Icon Trang Web & Đầu Trang
                     </h2>
+                  </div>
+
+                  {/* Website Icon (Favicon) */}
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                    <label className="block text-xs font-bold text-slate-800">
+                      Icon Trang Web (Favicon Trên Tab Trình Duyệt)
+                    </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white cursor-pointer hover:bg-slate-800">
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{uploadingSiteImage ? 'Đang tải...' : 'Tải icon mới'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleSiteAssetUpload(e, 'favicon_url')}
+                          className="hidden"
+                        />
+                      </label>
+                      <input
+                        type="url"
+                        value={settingsForm.favicon_url || ''}
+                        onChange={(e) =>
+                          setSettingsForm({ ...settingsForm, favicon_url: e.target.value })
+                        }
+                        placeholder="Link icon (hoặc để trống dùng icon BĐS mặc định)"
+                        className="flex-1 min-w-[200px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Tên Thương Hiệu / Tên Website (Logo)
+                        Tên Thương Hiệu / Tên Website
                       </label>
                       <input
                         type="text"
@@ -1107,7 +1213,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Dòng Phụ Dưới Tên Thương Hiệu Ở Header (Để trống sẽ ẩn)
+                        Dòng Phụ Dưới Tên Thương Hiệu
                       </label>
                       <input
                         type="text"
@@ -1115,7 +1221,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         onChange={(e) =>
                           setSettingsForm({ ...settingsForm, brand_subtitle: e.target.value })
                         }
-                        placeholder="Trước đây là: QUỸ ĐẤT SỔ HỒNG CHÍNH CHỦ (Để trống sẽ ẩn)"
                         className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                       />
                     </div>
@@ -1123,7 +1228,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Khẩu Hiệu Thanh Thông Báo Trên Cùng (Để trống sẽ ẩn)
+                      Thanh Thông Báo Trên Cùng
                     </label>
                     <input
                       type="text"
@@ -1138,7 +1243,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Nhãn Đầu Trang (Hero Badge - Để trống sẽ ẩn)
+                        Nhãn Đầu Trang
                       </label>
                       <input
                         type="text"
@@ -1169,7 +1274,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Tiêu Đề Lớn Đầu Trang (Hero Title)
+                      Tiêu Đề Lớn Đầu Trang
                     </label>
                     <input
                       type="text"
@@ -1183,7 +1288,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Mô Tả Ngắn Đầu Trang (Hero Subtitle - Để trống sẽ ẩn)
+                      Mô Tả Ngắn Đầu Trang
                     </label>
                     <textarea
                       rows={2}
@@ -1197,7 +1302,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Mô Tả Dưới Tiêu Đề Danh Sách Lô Đất (Để trống sẽ ẩn)
+                      Mô Tả Dưới Tiêu Đề Danh Sách Lô Đất
                     </label>
                     <input
                       type="text"
@@ -1208,7 +1313,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           plots_section_subtitle: e.target.value,
                         })
                       }
-                      placeholder="Để trống nếu không muốn hiển thị dòng mô tả phụ"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                     />
                   </div>
@@ -1216,7 +1320,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   {/* Hero Cover Image Upload */}
                   <div className="space-y-2">
                     <label className="block text-xs font-bold text-slate-700">
-                      Ảnh Nền Banner Đầu Trang (Hero Image)
+                      Ảnh Nền Đầu Trang
                     </label>
                     <div className="flex items-center gap-4">
                       <img
@@ -1250,13 +1354,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   {/* 3 Optional Counters */}
                   <div className="pt-2 border-t border-slate-100">
                     <label className="block text-xs font-bold text-slate-700 mb-2">
-                      3 Con Số Thống Kê Trên Banner (Để trống cả 3 sẽ tự động ẩn)
+                      Số Liệu Thống Kê Trên Đầu Trang
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
                         <input
                           type="text"
-                          placeholder="Con số 1"
+                          placeholder="Số liệu 1"
                           value={settingsForm.stat_1_value}
                           onChange={(e) =>
                             setSettingsForm({ ...settingsForm, stat_1_value: e.target.value })
@@ -1277,7 +1381,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
                         <input
                           type="text"
-                          placeholder="Con số 2"
+                          placeholder="Số liệu 2"
                           value={settingsForm.stat_2_value}
                           onChange={(e) =>
                             setSettingsForm({ ...settingsForm, stat_2_value: e.target.value })
@@ -1298,7 +1402,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
                         <input
                           type="text"
-                          placeholder="Con số 3"
+                          placeholder="Số liệu 3"
                           value={settingsForm.stat_3_value}
                           onChange={(e) =>
                             setSettingsForm({ ...settingsForm, stat_3_value: e.target.value })
@@ -1322,14 +1426,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 {/* Card 4: Optional 4-Step Process Section */}
                 <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xs space-y-5">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div>
-                      <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
-                        Phần 4 · Khu Vực Quy Trình 4 Bước (Tùy Chọn)
-                      </span>
-                      <h2 className="font-display text-2xl font-extrabold text-slate-900 mt-1">
-                        Quy Trình Làm Việc & Giao Dịch
-                      </h2>
-                    </div>
+                    <h2 className="font-display text-xl sm:text-2xl font-extrabold text-slate-900">
+                      4. Mục Quy Trình 4 Bước
+                    </h2>
                     <label className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-800 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1342,11 +1441,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         }
                         className="h-4 w-4 rounded accent-blue-600"
                       />
-                      <span>Bật hiển thị mục này</span>
+                      <span>Hiển thị</span>
                     </label>
                   </div>
 
-                  {settingsForm.show_process_section ? (
+                  {settingsForm.show_process_section && (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <input
@@ -1458,196 +1557,150 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <p className="text-xs sm:text-sm text-slate-500">
-                      Mục Quy trình 4 bước hiện đang được <strong>ẩn</strong> trên trang khách hàng. Bật công tắc phía trên nếu bạn muốn hiển thị và chỉnh sửa nội dung.
-                    </p>
                   )}
                 </div>
               </div>
             </div>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={savingSettings}
-                className="inline-flex items-center gap-2.5 rounded-2xl bg-blue-600 px-8 py-4 text-base font-extrabold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-              >
-                <Save className="h-5 w-5" />
-                <span>
-                  {savingSettings
-                    ? 'Đang ghi đè cấu hình...'
-                    : 'Lưu Toàn Bộ Cấu Hình Trang Web'}
-                </span>
-              </button>
-            </div>
           </form>
         )}
 
-        {/* TAB 3: ADMIN CREDENTIALS (REQUIRES OLD PASSWORD) */}
+        {/* TAB 3: PASSWORD CHANGE ONLY (No username display or username input) */}
         {activeTab === 'security' && (
-          <form
-            onSubmit={handleChangeCredentials}
-            className="max-w-2xl mx-auto rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-xs space-y-6"
-          >
-            <div className="flex items-start gap-4 border-b border-slate-100 pb-5">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-600 flex-shrink-0">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <div>
-                <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
-                  Bảo Mật Cấp Máy Chủ (Bcrypt)
-                </span>
-                <h2 className="font-display text-2xl font-extrabold text-slate-900 mt-1">
-                  Đổi Tài Khoản & Mật Khẩu Admin
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                  Tài khoản hiện tại: <strong className="text-slate-900">{currentAdminUser}</strong>. Để đảm bảo an toàn, bạn bắt buộc phải nhập đúng <strong>Mật khẩu cũ</strong> trước khi thiết lập mật khẩu mới.
-                </p>
-              </div>
+          <div className="max-w-xl mx-auto rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-xs space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h2 className="font-display text-2xl font-extrabold text-slate-900">
+                Đổi Mật Khẩu Admin
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowAdminPasswords(!showAdminPasswords)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+              >
+                {showAdminPasswords ? (
+                  <>
+                    <EyeOff className="h-4 w-4" />
+                    <span>Ẩn mật khẩu</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-4 w-4" />
+                    <span>Hiện mật khẩu</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            <div className="space-y-4">
+            <form onSubmit={handleChangePassword} className="space-y-5">
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs sm:text-sm font-bold text-slate-800">
-                    1. Mật Khẩu Hiện Tại (Mật Khẩu Cũ) *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowPasswords((p) => !p)}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    {showPasswords ? (
-                      <>
-                        <EyeOff className="h-3.5 w-3.5" /> Ẩn mật khẩu
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="h-3.5 w-3.5" /> Hiện mật khẩu
-                      </>
-                    )}
-                  </button>
-                </div>
+                <label
+                  htmlFor="old-admin-password"
+                  className="block text-xs sm:text-sm font-bold text-slate-800 mb-2"
+                >
+                  Mật Khẩu Hiện Tại
+                </label>
                 <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Lock className="h-4 w-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                   <input
-                    type={showPasswords ? 'text' : 'password'}
+                    id="old-admin-password"
+                    type={showAdminPasswords ? 'text' : 'password'}
+                    autoComplete="current-password"
                     required
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
-                    placeholder="Nhập mật khẩu đang sử dụng"
-                    className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 py-3 text-sm font-medium focus:border-blue-600 focus:bg-white focus:outline-none"
+                    placeholder="Nhập mật khẩu hiện tại"
+                    className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 py-3.5 text-sm font-semibold focus:border-blue-600 focus:bg-white focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs sm:text-sm font-bold text-slate-800 mb-1.5">
-                  2. Tên Tài Khoản Admin (Giữ nguyên hoặc nhập tên mới) *
+                <label
+                  htmlFor="new-admin-password"
+                  className="block text-xs sm:text-sm font-bold text-slate-800 mb-2"
+                >
+                  Mật Khẩu Mới
                 </label>
                 <div className="relative">
-                  <UserCheck className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <KeyRound className="h-4 w-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                   <input
-                    type="text"
+                    id="new-admin-password"
+                    type={showAdminPasswords ? 'text' : 'password'}
+                    autoComplete="new-password"
                     required
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 py-3 text-sm font-bold focus:border-blue-600 focus:bg-white focus:outline-none"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Nhập mật khẩu mới"
+                    className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 py-3.5 text-sm font-semibold focus:border-blue-600 focus:bg-white focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-800 mb-1.5">
-                    3. Mật Khẩu Mới (Tối thiểu 6 ký tự) *
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPasswords ? 'text' : 'password'}
-                      required
-                      minLength={6}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Nhập mật khẩu mới"
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 py-3 text-sm font-medium focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-800 mb-1.5">
-                    4. Nhập Lại Mật Khẩu Mới *
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPasswords ? 'text' : 'password'}
-                      required
-                      minLength={6}
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      placeholder="Xác nhận mật khẩu mới"
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 py-3 text-sm font-medium focus:border-blue-600 focus:bg-white focus:outline-none"
-                    />
-                  </div>
+              <div>
+                <label
+                  htmlFor="confirm-new-admin-password"
+                  className="block text-xs sm:text-sm font-bold text-slate-800 mb-2"
+                >
+                  Nhập Lại Mật Khẩu Mới
+                </label>
+                <div className="relative">
+                  <KeyRound className="h-4 w-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    id="confirm-new-admin-password"
+                    type={showAdminPasswords ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    required
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="Nhập lại mật khẩu mới"
+                    className="w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 py-3.5 text-sm font-semibold focus:border-blue-600 focus:bg-white focus:outline-none"
+                  />
                 </div>
               </div>
-            </div>
 
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600 flex items-start gap-2.5">
-              <ShieldAlert className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-              <span>
-                Mật khẩu của bạn được mã hóa một chiều bằng thuật toán <strong>Bcrypt</strong> trong cơ sở dữ liệu riêng biệt và không bao giờ hiển thị ra trình duyệt.
-              </span>
-            </div>
-
-            <button
-              type="submit"
-              disabled={savingCredentials}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-4 text-sm sm:text-base font-extrabold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="h-5 w-5" />
-              <span>
-                {savingCredentials
-                  ? 'Đang xác thực & cập nhật...'
-                  : 'Xác Nhận Đổi Thông Tin Bảo Mật'}
-              </span>
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={savingCredentials}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-4 text-base font-extrabold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+              >
+                <Save className="h-5 w-5" />
+                <span>{savingCredentials ? 'Đang cập nhật...' : 'Lưu Mật Khẩu Mới'}</span>
+              </button>
+            </form>
+          </div>
         )}
       </main>
 
       {/* MODAL ADD / EDIT LAND PLOT */}
       {isEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 sm:p-6 backdrop-blur-xs overflow-y-auto">
-          <div className="my-auto w-full max-w-5xl rounded-3xl border border-slate-200 bg-[#F8FAFC] shadow-2xl overflow-hidden max-h-[94vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-[#0F172A] px-6 py-4 text-white">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-                  {editingPlotId ? 'Chỉnh Sửa Lô Đất' : 'Thêm Lô Đất Mới'}
-                </span>
-                <h3 className="font-display text-xl sm:text-2xl font-extrabold">
-                  {editingPlotId
-                    ? `Lô ${plotForm.code}: ${plotForm.title}`
-                    : 'Nhập Thông Tin Lô Đất'}
-                </h3>
-              </div>
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsEditorOpen(false);
+            }
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-3 sm:p-6 backdrop-blur-xs overflow-y-auto"
+        >
+          <div className="my-auto w-full max-w-5xl rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-6 py-4 text-white">
+              <h3 className="font-display text-xl sm:text-2xl font-extrabold text-white">
+                {editingPlotId
+                  ? `Chỉnh Sửa Lô Đất: ${plotForm.code}`
+                  : 'Thêm Lô Đất Mới'}
+              </h3>
               <button
                 type="button"
                 onClick={() => setIsEditorOpen(false)}
-                className="rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 cursor-pointer"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Modal Form Body */}
-            <form onSubmit={handleSavePlot} className="overflow-y-auto p-6 space-y-6">
-              {/* Row 1: Basic Identification */}
+            <form
+              onSubmit={handleSavePlot}
+              className="p-6 sm:p-8 overflow-y-auto space-y-6 flex-1 bg-slate-50/50"
+            >
+              {/* Row 1: Code & Title */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-12 bg-white p-5 rounded-2xl border border-slate-200">
                 <div className="sm:col-span-3">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1658,49 +1711,42 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     required
                     value={plotForm.code}
                     onChange={(e) => setPlotForm({ ...plotForm, code: e.target.value })}
-                    placeholder="VD: LK-01"
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech font-bold"
                   />
                 </div>
 
                 <div className="sm:col-span-9">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Tiêu Đề Giới Thiệu Lô Đất *
+                    Tên Tiêu Đề Lô Đất *
                   </label>
                   <input
                     type="text"
                     required
                     value={plotForm.title}
                     onChange={(e) => setPlotForm({ ...plotForm, title: e.target.value })}
-                    placeholder="VD: Lô Góc 2 Mặt Tiền Khu Đô Thị Ven Sông"
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-bold"
                   />
                 </div>
 
                 <div className="sm:col-span-12">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mô Tả Ngắn (Để trống sẽ ẩn)
+                    Mô Tả Ngắn Dưới Tiêu Đề
                   </label>
                   <input
                     type="text"
                     value={plotForm.subtitle}
                     onChange={(e) => setPlotForm({ ...plotForm, subtitle: e.target.value })}
-                    placeholder="Tùy chọn: Mô tả ngắn dưới tiêu đề..."
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                   />
                 </div>
               </div>
 
-              {/* Row 2: Pricing & Technical Specs (All optional — blank fields are automatically hidden on customer site) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4">
-                <div className="text-xs font-bold text-blue-700 bg-blue-50 px-3.5 py-2 rounded-xl border border-blue-200">
-                  Lưu ý: Ô nào bạn <strong>để trống</strong> thì trên trang khách hàng sẽ tự động ẩn ô đó (nếu để trống <strong>Giá Hiển Thị</strong> thì sẽ hiện chữ <em>"Liên hệ để trao đổi"</em>).
-                </div>
-
+              {/* Row 2: Price & Specs */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div>
                     <label className="block text-xs font-bold text-blue-700 mb-1">
-                      Giá Hiển Thị (Để trống = Liên hệ để trao đổi)
+                      Giá Bán
                     </label>
                     <input
                       type="text"
@@ -1708,14 +1754,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, price_display: e.target.value })
                       }
-                      placeholder="VD: 2.45 Tỷ (Hoặc để trống)"
                       className="w-full rounded-xl border border-blue-400 bg-blue-50/40 px-3.5 py-2.5 text-sm font-tech font-bold text-slate-900"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Giá Quy Đổi Tỷ (Số để sắp xếp, VD: 2.45)
+                      Giá Quy Đổi (Tỷ)
                     </label>
                     <input
                       type="number"
@@ -1727,14 +1772,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           price_billion: parseFloat(e.target.value) || 0,
                         })
                       }
-                      placeholder="0"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Đơn Giá / m² (Để trống sẽ ẩn)
+                      Đơn Giá / m²
                     </label>
                     <input
                       type="text"
@@ -1742,14 +1786,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, price_per_m2: e.target.value })
                       }
-                      placeholder="VD: 16.3 Triệu/m²"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Diện Tích m² (Nhập 0 hoặc để trống sẽ ẩn)
+                      Diện Tích (m²)
                     </label>
                     <input
                       type="number"
@@ -1758,14 +1801,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, area_m2: parseFloat(e.target.value) || 0 })
                       }
-                      placeholder="VD: 150"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech font-bold"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Kích Thước Ngang × Dài (Để trống sẽ ẩn)
+                      Kích Thước (Ngang × Dài)
                     </label>
                     <input
                       type="text"
@@ -1773,14 +1815,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, dimensions: e.target.value })
                       }
-                      placeholder="VD: 6m × 25m (Để trống sẽ không hiện)"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm font-tech"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Hướng Đất (Chọn trống sẽ ẩn)
+                      Hướng Đất
                     </label>
                     <select
                       value={plotForm.direction}
@@ -1791,7 +1832,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     >
                       {LAND_DIRECTIONS.map((d) => (
                         <option key={d} value={d}>
-                          {d === '' ? '-- Để trống (Không hiển thị) --' : d}
+                          {d === '' ? '-- Không chọn --' : d}
                         </option>
                       ))}
                     </select>
@@ -1799,7 +1840,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Đường Trước Đất (Để trống sẽ ẩn)
+                      Đường Trước Đất
                     </label>
                     <input
                       type="text"
@@ -1807,7 +1848,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, road_width: e.target.value })
                       }
-                      placeholder="VD: Đường nhựa 12m"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                     />
                   </div>
@@ -1833,7 +1873,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Thông Tin Pháp Lý (Để trống sẽ ẩn)
+                      Pháp Lý
                     </label>
                     <input
                       type="text"
@@ -1841,7 +1881,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       onChange={(e) =>
                         setPlotForm({ ...plotForm, legal_status: e.target.value })
                       }
-                      placeholder="Để trống nếu không muốn hiển thị"
                       className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                     />
                   </div>
@@ -1860,7 +1899,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     onChange={(e) =>
                       setPlotForm({ ...plotForm, location_name: e.target.value })
                     }
-                    placeholder="VD: KĐT Nam Hòa Xuân"
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                   />
                 </div>
@@ -1875,14 +1913,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     onChange={(e) =>
                       setPlotForm({ ...plotForm, province: e.target.value })
                     }
-                    placeholder="VD: Đà Nẵng / Đồng Nai"
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Link Google Maps (Để trống sẽ ẩn nút mở Map)
+                    Link Google Maps
                   </label>
                   <input
                     type="url"
@@ -1890,14 +1927,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     onChange={(e) =>
                       setPlotForm({ ...plotForm, map_url: e.target.value })
                     }
-                    placeholder="Để trống sẽ không hiện nút mở Map"
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-sm"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Trạng Thái Mở Bán
+                    Trạng Thái
                   </label>
                   <select
                     value={plotForm.status}
@@ -1922,26 +1958,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       }
                       className="h-4 w-4 rounded accent-blue-600"
                     />
-                    <span>Ghim lô đất này làm "Lô Nổi Bật" lên đầu trang web</span>
+                    <span>Ghim làm Lô Nổi Bật</span>
                   </label>
                 </div>
               </div>
 
               {/* Row 4: UNIFIED UPLOAD IMAGES & VIDEOS */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div>
-                    <h4 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                      Hình Ảnh / Video Của Lô Đất
-                    </h4>
-                    <p className="text-xs text-slate-500">
-                      Tất cả hình ảnh và video sẽ được gộp chung trong mục "Hình ảnh / Video" và hỗ trợ xem toàn màn hình.
-                    </p>
-                  </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
+                    Hình Ảnh / Video
+                  </h4>
                   {uploadingMedia && (
                     <span className="inline-flex items-center gap-2 text-xs font-bold text-blue-700">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Đang tải tệp lên đám mây...
+                      Đang tải tệp lên...
                     </span>
                   )}
                 </div>
@@ -1950,7 +1981,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <div className="flex flex-wrap items-center gap-3">
                   <label className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs sm:text-sm font-bold text-white cursor-pointer hover:bg-blue-700">
                     <Upload className="h-4 w-4" />
-                    <span>Tải Hình Ảnh Từ Máy ({plotForm.images.length})</span>
+                    <span>Tải Hình Ảnh ({plotForm.images.length})</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1962,7 +1993,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                   <label className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs sm:text-sm font-bold text-white cursor-pointer hover:bg-slate-800">
                     <Upload className="h-4 w-4 text-amber-400" />
-                    <span>Tải Video (.mp4, .mov) Từ Máy ({plotForm.videos.length})</span>
+                    <span>Tải Video ({plotForm.videos.length})</span>
                     <input
                       type="file"
                       accept="video/*"
@@ -1980,7 +2011,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       type="url"
                       value={newImageUrl}
                       onChange={(e) => setNewImageUrl(e.target.value)}
-                      placeholder="Hoặc dán link hình ảnh..."
+                      placeholder="Dán link hình ảnh..."
                       className="flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs"
                     />
                     <button
@@ -1995,7 +2026,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       }}
                       className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-900 hover:text-white cursor-pointer"
                     >
-                      + Link Ảnh
+                      + Thêm Ảnh
                     </button>
                   </div>
 
@@ -2004,7 +2035,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       type="url"
                       value={newVideoUrl}
                       onChange={(e) => setNewVideoUrl(e.target.value)}
-                      placeholder="Hoặc dán link video (.mp4)..."
+                      placeholder="Dán link video (.mp4)..."
                       className="flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs"
                     />
                     <button
@@ -2019,12 +2050,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       }}
                       className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-900 hover:text-white cursor-pointer"
                     >
-                      + Link Video
+                      + Thêm Video
                     </button>
                   </div>
                 </div>
 
-                {/* Combined Preview Grid */}
+                {/* Combined Preview Grid (Video preview uses actual video frame) */}
                 {(plotForm.images.length > 0 || plotForm.videos.length > 0) && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 pt-2">
                     {plotForm.images.map((img, idx) => (
@@ -2038,7 +2069,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           className="h-full w-full object-cover"
                         />
                         <span className="absolute bottom-1.5 left-1.5 rounded bg-slate-900/85 px-2 py-0.5 text-[10px] font-bold text-amber-400">
-                          {idx === 0 ? 'Ảnh Bìa Chính' : `Ảnh #${idx + 1}`}
+                          {idx === 0 ? 'Ảnh Bìa' : `Ảnh #${idx + 1}`}
                         </span>
                         <button
                           type="button"
@@ -2049,7 +2080,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             }))
                           }
                           className="absolute top-1.5 right-1.5 rounded-full bg-red-600 p-1 text-white shadow hover:bg-red-700 cursor-pointer"
-                          title="Xóa ảnh này"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -2059,10 +2089,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     {plotForm.videos.map((vUrl, idx) => (
                       <div
                         key={`vid-${idx}`}
-                        className="group relative aspect-[16/10] rounded-xl overflow-hidden border border-slate-300 bg-slate-900 flex flex-col items-center justify-center p-2 text-center"
+                        className="group relative aspect-[16/10] rounded-xl overflow-hidden border border-slate-300 bg-slate-900"
                       >
-                        <Film className="h-6 w-6 text-amber-400 mb-1" />
-                        <span className="text-[11px] font-bold text-white truncate w-full px-1">
+                        <video
+                          src={`${vUrl}#t=0.1`}
+                          preload="metadata"
+                          muted
+                          playsInline
+                          width={240}
+                          height={150}
+                          className="h-full w-full object-cover opacity-85 pointer-events-none"
+                        />
+                        <span className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                          <Film className="h-3 w-3" />
                           Video #{idx + 1}
                         </span>
                         <button
@@ -2074,7 +2113,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             }))
                           }
                           className="absolute top-1.5 right-1.5 rounded-full bg-red-600 p-1 text-white shadow hover:bg-red-700 cursor-pointer"
-                          title="Xóa video này"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -2088,7 +2126,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 bg-white p-5 rounded-2xl border border-slate-200">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mô Tả Chi Tiết Lô Đất (Để trống sẽ ẩn)
+                    Mô Tả Chi Tiết
                   </label>
                   <textarea
                     rows={5}
@@ -2096,20 +2134,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     onChange={(e) =>
                       setPlotForm({ ...plotForm, description: e.target.value })
                     }
-                    placeholder="Mô tả chi tiết vị trí, tiện ích xung quanh (hoặc để trống)..."
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Các Điểm Nổi Bật (Mỗi dòng 1 ý - Để trống sẽ ẩn)
+                    Đặc Điểm Nổi Bật
                   </label>
                   <textarea
                     rows={5}
                     value={highlightsText}
                     onChange={(e) => setHighlightsText(e.target.value)}
-                    placeholder="Mỗi dòng 1 điểm nổi bật (để trống nếu không cần hiển thị)..."
                     className="w-full rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm"
                   />
                 </div>
@@ -2122,7 +2158,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   onClick={() => setIsEditorOpen(false)}
                   className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
                 >
-                  Hủy Bỏ
+                  Hủy
                 </button>
                 <button
                   type="submit"
@@ -2132,10 +2168,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <Save className="h-4 w-4" />
                   <span>
                     {savingPlot
-                      ? 'Đang lưu dữ liệu...'
+                      ? 'Đang lưu...'
                       : editingPlotId
-                      ? 'Lưu Cập Nhật Lô Đất'
-                      : 'Tạo Lô Đất Mới'}
+                      ? 'Lưu Cập Nhật'
+                      : 'Tạo Lô Đất'}
                   </span>
                 </button>
               </div>
